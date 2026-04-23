@@ -134,7 +134,7 @@ def analyze_complaint(text):
     return gr.update(visible=True), p_html, i_html, sp_html, pr_html, status_html, expl_text, ""
 
 # 6. UI Composition
-with gr.Blocks(title="CFPB AI Intelligence", css=custom_css) as demo:
+with gr.Blocks(title="CFPB AI Intelligence") as demo:
     gr.HTML("<div style='text-align: center;'><h1>🤖 CFPB Complaint Intelligence</h1><p>Strategic ML Monitoring System</p></div>")
     
     with gr.Column(elem_classes="card"):
@@ -154,4 +154,12 @@ with gr.Blocks(title="CFPB AI Intelligence", css=custom_css) as demo:
     btn.click(analyze_complaint, inp, [out_sec, p_out, i_out, s_out, pr_out, stat_out, expl_out])
 
 if __name__ == "__main__":
-    demo.launch(server_name="0.0.0.0", server_port=7860)
+    # If running in Docker (HF), it needs 0.0.0.0. Otherwise, defaults to localhost.
+    is_docker = os.path.exists('/.dockerenv') or os.environ.get('HF_HUB_HTTP_ENDPOINT')
+    server_name = "0.0.0.0" if is_docker else "127.0.0.1"
+    
+    demo.launch(
+        server_name=server_name,
+        server_port=7860,
+        css=custom_css
+    )
