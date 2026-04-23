@@ -60,7 +60,15 @@ class ModelRegistry:
 
 registry = ModelRegistry()
 
-bg_path = os.path.abspath("static/background.png").replace("\\", "/")
+def get_base64_bg():
+    import base64
+    try:
+        with open("static/background.png", "rb") as image_file:
+            return base64.b64encode(image_file.read()).decode('utf-8')
+    except:
+        return ""
+
+bg_base64 = get_base64_bg()
 
 # 3. ROBUST CSS WITH BACKGROUND FIX
 custom_css = f"""
@@ -68,7 +76,7 @@ custom_css = f"""
 
 body, .gradio-container {{
     background: linear-gradient(rgba(10, 14, 42, 0.8), rgba(10, 14, 42, 0.8)), 
-                url('/file={bg_path}') !important;
+                url('data:image/png;base64,{bg_base64}') !important;
     background-size: cover !important;
     background-attachment: fixed !important;
     background-position: center !important;
