@@ -4,7 +4,7 @@ import joblib
 import os
 import spacy
 import random
-from src.utils.text_utils import clean_text
+from src.utils.text_utils import clean_and_lemmatize
 
 # 1. SAMPLE DATA FOR THE "USE SAMPLE" FEATURE
 sample_inputs = {
@@ -214,7 +214,7 @@ def analyze_complaint(text):
         return [gr.update(visible=False)] * 7
 
     models, nlp = registry.load_all()
-    cleaned = clean_text(text, nlp)
+    cleaned = clean_and_lemmatize(text)
     
     # 1. Product
     prod_pred = models['product'].predict([cleaned])[0]
