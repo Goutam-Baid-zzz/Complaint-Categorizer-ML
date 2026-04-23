@@ -60,53 +60,55 @@ class ModelRegistry:
 
 registry = ModelRegistry()
 
+bg_path = os.path.abspath("static/background.png").replace("\\", "/")
+
 # 3. ROBUST CSS WITH BACKGROUND FIX
-custom_css = """
+custom_css = f"""
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
 
-body, .gradio-container {
+body, .gradio-container {{
     background: linear-gradient(rgba(10, 14, 42, 0.8), rgba(10, 14, 42, 0.8)), 
-                url('/file=static/background.png') !important;
+                url('/file={bg_path}') !important;
     background-size: cover !important;
     background-attachment: fixed !important;
     background-position: center !important;
     color: #ffffff !important;
     font-family: 'Inter', sans-serif !important;
-}
+}}
 
-.gradio-container { max-width: 950px !important; margin: auto !important; border: none !important; box-shadow: none !important; }
+.gradio-container {{ max-width: 950px !important; margin: auto !important; border: none !important; box-shadow: none !important; }}
 
 /* Cards & Layout */
-.main-card {
+.main-card {{
     background: rgba(17, 23, 53, 0.8) !important;
     border: 1px solid rgba(139, 92, 246, 0.4) !important;
     border-radius: 12px !important;
     padding: 24px !important;
     box-shadow: 0 10px 40px rgba(0, 0, 0, 0.7) !important;
-}
+}}
 
-textarea {
+textarea {{
     background: rgba(15, 23, 42, 0.95) !important;
     border: 1px solid #334155 !important;
     color: #f8fafc !important;
     border-radius: 8px !important;
-}
+}}
 
-.analyze-btn {
+.analyze-btn {{
     background: linear-gradient(90deg, #7c3aed, #db2777) !important;
     height: 56px !important; font-size: 18px !important; font-weight: 800 !important;
     box-shadow: 0 4px 25px rgba(124, 58, 237, 0.5) !important; border: none !important;
-}
+}}
 
-.sample-btn { background: #5b21b6 !important; border: none !important; }
+.sample-btn {{ background: #5b21b6 !important; border: none !important; }}
 
 /* Custom Output Grid */
-.output-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 25px; }
-.output-item { background: rgba(15, 23, 42, 0.6); border: 1px solid #1e293b; padding: 18px; border-radius: 10px; }
-.output-label { font-size: 14px; font-weight: 600; color: #94a3b8; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
-.output-val { font-size: 26px !important; font-weight: 800 !important; display: block; }
+.output-grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 25px; }}
+.output-item {{ background: rgba(15, 23, 42, 0.6); border: 1px solid #1e293b; padding: 18px; border-radius: 10px; }}
+.output-label {{ font-size: 14px; font-weight: 600; color: #94a3b8; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }}
+.output-val {{ font-size: 26px !important; font-weight: 800 !important; display: block; }}
 
-footer { display: none !important; }
+footer {{ display: none !important; }}
 """
 
 def analyze_complaint(text):
@@ -162,7 +164,7 @@ with gr.Blocks(title="CFPB AI Intelligence") as demo:
     gr.HTML("""
     <div style="text-align: center; margin-bottom: 30px; margin-top: 20px;">
         <div style="font-size: 48px; font-weight: 800; display: flex; align-items: center; justify-content: center; gap: 20px; color: #ffffff;">
-            <img src="https://img.icons8.com/isometric/100/Bot.png" width="56"/>
+            <span style="font-size: 56px; line-height: 1; filter: drop-shadow(0 0 10px rgba(168, 85, 247, 0.5));">🤖</span>
             <span style="background: linear-gradient(90deg, #a855f7, #ffffff); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">CFPB Complaint Intelligence</span>
         </div>
         <div style="color: #cbd5e1; font-size: 18px; margin-top: 8px;">Strategic ML Monitoring System for Smarter Complaint Analysis</div>
