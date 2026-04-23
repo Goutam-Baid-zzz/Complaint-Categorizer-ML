@@ -1,0 +1,105 @@
+
+[2026-04-02 20:37:56] TRAINING SESSION: PRODUCT MODEL
+Model used: Ensemble (LinearSVC, LogisticRegression, MultinomialNB)
+Hyperparameters (LinearSVC): {'C': 0.1}
+Dataset: train_data_v2.csv (Size: 20000)
+Performance: Accuracy 0.8462, Macro-F1 0.7485
+--------------------------------------------------
+
+[2026-04-02 20:39:58] TRAINING SESSION: SUB-PRODUCT MODEL
+Model used: Ensemble (LinearSVC, LogisticRegression, MultinomialNB)
+Hyperparameters (LinearSVC): {'C': 0.1}
+Dataset: train_data_v2.csv (Sub-product subset)
+Performance: Accuracy 0.7940, Macro-F1 0.6080
+--------------------------------------------------
+
+[2026-04-02 20:45:32] TRAINING SESSION: ISSUE MODEL
+Model used: Ensemble (LinearSVC, LogisticRegression, MultinomialNB)
+Hyperparameters (LinearSVC): {'C': 1}
+Dataset: train_data_v2.csv (Issue grouping subset)
+Performance: Accuracy 0.7390, Macro-F1 0.5996
+--------------------------------------------------
+
+[2026-04-02 20:49:22] TRAINING SESSION: PRIORITY MODEL
+Model used: Ensemble (LinearSVC, LogisticRegression, MultinomialNB)
+Hyperparameters (LinearSVC): {'C': 3}
+Dataset: train_data_v2.csv (Derived Priority)
+Performance: Accuracy 0.9085, Macro-F1 0.8178
+--------------------------------------------------
+
+[2026-04-02 20:51:52] TRAINING SESSION: PRODUCT MODEL
+Model used: Ensemble (LinearSVC, LogisticRegression, MultinomialNB)
+Hyperparameters (LinearSVC): {'C': 0.1}
+Dataset: train_data_v2.csv (Size: 20000)
+Performance: Accuracy 0.8462, Macro-F1 0.7485, Weighted-F1 0.8516
+--------------------------------------------------
+
+[2026-04-02 20:53:48] TRAINING SESSION: SUB-PRODUCT MODEL
+Model used: Ensemble (LinearSVC, LogisticRegression, MultinomialNB)
+Hyperparameters (LinearSVC): {'C': 0.1}
+Dataset: train_data_v2.csv (Sub-product subset)
+Performance: Accuracy 0.7940, Macro-F1 0.6080, Weighted-F1 0.7960
+--------------------------------------------------
+
+[2026-04-02 20:55:22] TRAINING SESSION: ISSUE MODEL
+Model used: Ensemble (LinearSVC, LogisticRegression, MultinomialNB)
+Hyperparameters (LinearSVC): {'C': 1}
+Dataset: train_data_v2.csv (Issue grouping subset)
+Performance: Accuracy 0.7390, Macro-F1 0.5996, Weighted-F1 0.7406
+--------------------------------------------------
+
+[2026-04-02 20:56:22] TRAINING SESSION: PRIORITY MODEL
+Model used: Ensemble (LinearSVC, LogisticRegression, MultinomialNB)
+Hyperparameters (LinearSVC): {'C': 3}
+Dataset: train_data_v2.csv (Derived Priority)
+Performance: Accuracy 0.9085, Macro-F1 0.8178, Weighted-F1 0.9124
+--------------------------------------------------
+
+[2026-04-02 22:43:34] TRAINING SESSION: SUB-PRODUCT MODEL
+Model used: Ensemble (LinearSVC, LogisticRegression, MultinomialNB)
+Hyperparameters (LinearSVC): {'C': 0.1}
+Dataset: train_data_v2.csv (Sub-product subset)
+Performance: Accuracy 0.8004, Macro-F1 0.5994, Weighted-F1 0.7976
+--------------------------------------------------
+
+[2026-04-02 22:46:03] TRAINING SESSION: ISSUE MODEL
+Model used: Ensemble (LinearSVC, LogisticRegression, MultinomialNB)
+Hyperparameters (LinearSVC): {'C': 1}
+Dataset: train_data_v2.csv (Issue grouping subset)
+Performance: Accuracy 0.7572, Macro-F1 0.6021, Weighted-F1 0.7532
+--------------------------------------------------
+
+[2026-04-02 22:55:53] TRAINING SESSION: SUB-PRODUCT MODEL
+Model used: Ensemble (LinearSVC, LogisticRegression, MultinomialNB)
+Hyperparameters (LinearSVC): {'C': 0.1}
+Dataset: train_data_v2.csv (Sub-product subset)
+Performance: Accuracy 0.7797, Macro-F1 0.5368, Weighted-F1 0.7783
+--------------------------------------------------
+
+[2026-04-02 22:59:27] TRAINING SESSION: ISSUE MODEL
+Model used: Ensemble (LinearSVC, LogisticRegression, MultinomialNB)
+Hyperparameters (LinearSVC): {'C': 1}
+Dataset: train_data_v2.csv (Issue grouping subset)
+Performance: Accuracy 0.7338, Macro-F1 0.5397, Weighted-F1 0.7263
+--------------------------------------------------
+
+[2026-04-02 23:03:15] TRAINING SESSION: SUB-PRODUCT MODEL
+Model used: Ensemble (LinearSVC, LogisticRegression, MultinomialNB)
+Hyperparameters (LinearSVC): {'C': 0.1}
+Dataset: train_data_v2.csv (Sub-product subset)
+Performance: Accuracy 0.8004, Macro-F1 0.5994, Weighted-F1 0.7976
+--------------------------------------------------
+
+[2026-04-10 13:05:23] TRAINING SESSION: ISSUE MODEL
+Model used: Ensemble (LinearSVC, LogisticRegression, MultinomialNB)
+Hyperparameters (LinearSVC): {'C': 1}
+Dataset: train_data_v2.csv (Issue grouping subset)
+Performance: Accuracy 0.7572, Macro-F1 0.6021, Weighted-F1 0.7532
+--------------------------------------------------
+
+[2026-04-10 13:11:50] TRAINING SESSION: PRODUCT MODEL
+Model used: Ensemble (LinearSVC, LogisticRegression, MultinomialNB)
+Hyperparameters (LinearSVC): {'C': 0.1}
+Dataset: train_data_v2.csv (Size: 20000)
+Performance: Accuracy 0.8462, Macro-F1 0.7485, Weighted-F1 0.8516
+--------------------------------------------------

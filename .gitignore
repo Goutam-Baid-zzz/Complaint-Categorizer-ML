@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+*.pkl
+.env
+.DS_Store
+
+# Datasets & Models (Large files)
+data/raw/
+models/
+*.zip
+*.csv
+*.pkl
