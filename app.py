@@ -134,6 +134,8 @@ textarea {
 .prog-well { width: 100%; height: 8px; background: #1e293b; border-radius: 4px; margin-top: 12px; }
 .prog-fill { height: 100%; border-radius: 4px; box-shadow: 0 0 12px #10b981; transition: width 1s ease-in-out; }
 
+.output-row { margin-top: 20px !important; }
+
 .footer { display: flex; justify-content: space-between; font-size: 13px; color: #64748b; margin-top: 40px; }
 footer { display: none !important; }
 """
@@ -173,7 +175,7 @@ def analyze_complaint(text):
     return (gr.update(visible=True), product, sub_product, issue, priority, html_status)
 
 # 5. UI COMPOSITION
-with gr.Blocks(title="CFPB AI Intelligence", css=custom_css) as demo:
+with gr.Blocks(title="CFPB AI Intelligence") as demo:
     gr.HTML("""
     <div class="header-container">
         <div class="header-title">
@@ -202,7 +204,7 @@ with gr.Blocks(title="CFPB AI Intelligence", css=custom_css) as demo:
                 gr.HTML('<div class="res-label">🏷️ Sub-product</div>')
                 s_out = gr.HTML('<span class="res-val" style="color: #ffffff;">Personal Loan</span>')
         
-        with gr.Row(style="margin-top: 20px;"):
+        with gr.Row(elem_classes="output-row"):
             with gr.Column(elem_classes="res-item"):
                 gr.HTML('<div class="res-label">⚠️ Issue</div>')
                 i_out = gr.HTML('<span class="res-val" style="color: #f59e0b;">Credit Report Issues</span>')
