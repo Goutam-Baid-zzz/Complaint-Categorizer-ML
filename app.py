@@ -74,17 +74,25 @@ bg_base64 = get_base64_bg()
 custom_css = f"""
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
 
-body, .gradio-container {{
+html, body, .gradio-container {{
     background: linear-gradient(rgba(10, 14, 42, 0.8), rgba(10, 14, 42, 0.8)), 
                 url('data:image/png;base64,{bg_base64}') !important;
     background-size: cover !important;
     background-attachment: fixed !important;
     background-position: center !important;
+    margin: 0 !important;
+    min-height: 100vh !important;
     color: #ffffff !important;
     font-family: 'Inter', sans-serif !important;
 }}
 
-.gradio-container {{ max-width: 950px !important; margin: auto !important; border: none !important; box-shadow: none !important; }}
+.gradio-container {{ 
+    max-width: 950px !important; 
+    margin: auto !important; 
+    border: none !important; 
+    box-shadow: none !important; 
+    background: transparent !important;
+}}
 
 /* Cards & Layout */
 .main-card {{
