@@ -74,9 +74,10 @@ custom_css = """
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
 
 body, .gradio-container {
-    background: #0a0e2a !important;
-    background-image: radial-gradient(circle at 20% 30%, #1a1f3a 0%, transparent 50%),
-                      radial-gradient(circle at 80% 70%, #2a1f4a 0%, transparent 50%) !important;
+    background: linear-gradient(rgba(10, 14, 42, 0.85), rgba(10, 14, 42, 0.85)),
+                url('file/static/background.png') !important;
+    background-size: cover !important;
+    background-attachment: fixed !important;
     color: #ffffff !important;
     font-family: 'Inter', sans-serif !important;
 }
