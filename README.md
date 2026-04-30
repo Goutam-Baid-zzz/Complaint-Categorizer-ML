@@ -122,6 +122,7 @@ Access the app at `http://localhost:8501`
 ---
 
 ## 📁 Project Structure
+```bash
 .
 ├── app.py                    # Main Streamlit application
 ├── models/                   # Trained model files (.pkl)
@@ -142,25 +143,5 @@ Access the app at `http://localhost:8501`
 ├── requirements.txt         # Python dependencies
 ├── Dockerfile              # Docker configuration
 └── README.md               # This file
-
+```
 ---
-
-## 🔒 Security & Privacy
-- All data processing happens locally/on your deployment
-- No data is stored or transmitted to third parties
-- Model predictions are generated in real-time
-
----
-
-## 📝 License
-This project is open-source and available for educational and research purposes.
-
----
-
-## 🤝 Contributing
-Contributions are welcome! Please feel free to submit a Pull Request.
-
----
-
-## 📧 Contact
-For questions or feedback, please open an issue on GitHub.
