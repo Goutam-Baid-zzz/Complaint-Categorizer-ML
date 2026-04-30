@@ -1,10 +1,18 @@
-import gradio as gr
+import streamlit as st
 import pandas as pd
 import joblib
 import os
 import spacy
 import random
 from src.utils.text_utils import clean_and_lemmatize
+
+# Page configuration
+st.set_page_config(
+    page_title="CFPB AI Intelligence",
+    page_icon="🤖",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
 
 # 1. ENHANCED SAMPLE DATA
 sample_inputs = [
@@ -21,8 +29,6 @@ sample_inputs = [
     "The bank has charged me an incorrect interest rate on my loan, which is higher than what was agreed upon during approval.",
     "I attempted to withdraw cash from an ATM, but the money was not dispensed while the amount was deducted from my account.",
     "The payment gateway failed during an online transaction, but the amount was still deducted from my account.",
-    "My account was closed by the bank without any prior communication or explanation.",
-    "I have been charged hidden fees and charges that were not disclosed at the time of account opening.",
     "The interest rate applied to my loan is significantly higher than what was initially promised by the bank representative.",
     "I raised a dispute regarding a transaction, but it has not been resolved even after several weeks.",
     "Customer support has been unresponsive, and I am unable to get any updates regarding my complaint.",
@@ -40,14 +46,13 @@ sample_inputs = [
     "The bank has applied charges on my credit card transactions without providing any clear explanation or breakdown.",
     "My card was blocked without any prior notice, and I am unable to use it for transactions.",
     "The KYC verification process failed incorrectly even though all submitted documents were valid.",
-    "A payment I made has not been reflected in the recipient’s account even after successful deduction.",
+    "A payment I made has not been reflected in the recipient's account even after successful deduction.",
     "There has been a duplicate deduction of EMI for my loan in the same billing cycle.",
     "The mobile banking app crashed during a transaction, but the amount was still deducted.",
     "I suspect there is a security issue in my account as I am seeing unfamiliar activity."
 ]
-while len(sample_inputs) < 40: sample_inputs.append(random.choice(sample_inputs))
-
-def use_sample(): return random.choice(sample_inputs)
+while len(sample_inputs) < 40: 
+    sample_inputs.append(random.choice(sample_inputs))
 
 # 2. MODEL REGISTRY
 class ModelRegistry:
@@ -64,40 +69,49 @@ class ModelRegistry:
         if not self.models:
             print("🧠 Loading models...")
             try:
+                print("  -> Loading spacy...")
                 self.nlp = spacy.load("en_core_web_sm", disable=["parser", "ner"])
             except:
+                print("  -> Downloading spacy...")
                 os.system("python -m spacy download en_core_web_sm")
                 self.nlp = spacy.load("en_core_web_sm", disable=["parser", "ner"])
+            print("  ✅ Spacy loaded!")
 
             base = "models"
             try:
+                print("  -> Loading product_model...")
                 self.models['product'] = joblib.load(f"{base}/product_model_v2.pkl")
+                print("  -> Loading sub_product_model...")
                 self.models['sub_product'] = joblib.load(f"{base}/sub_product_model_v2.pkl")
+                print("  -> Loading issue_model...")
                 self.models['issue'] = joblib.load(f"{base}/issue_model_v2.pkl")
+                print("  -> Loading priority_model...")
                 self.models['priority'] = joblib.load(f"{base}/priority_model_v2.pkl")
+                print("  -> Loading vectorizer...")
                 self.vectorizer = joblib.load(f"{base}/tfidf_vectorizer_v2.pkl")
-            except:
-                for root, dirs, files in os.walk("."):
-                    if "product_model_v2.pkl" in files:
-                        self.models['product'] = joblib.load(os.path.join(root, "product_model_v2.pkl"))
-                        self.models['sub_product'] = joblib.load(os.path.join(root, "sub_product_model_v2.pkl"))
-                        self.models['issue'] = joblib.load(os.path.join(root, "issue_model_v2.pkl"))
-                        self.models['priority'] = joblib.load(os.path.join(root, "priority_model_v2.pkl"))
-                        self.vectorizer = joblib.load(os.path.join(root, "tfidf_vectorizer_v2.pkl"))
-                        break
+                print("  ✅ All models loaded via standard path!")
+            except Exception as e:
+                print(f"  ❌ Failed standard load: {e}")
+                print("  -> Attempting fallback search...")
+                for file_name in ["product_model_v2.pkl", "sub_product_model_v2.pkl", "issue_model_v2.pkl", "priority_model_v2.pkl", "tfidf_vectorizer_v2.pkl"]:
+                    path = os.path.join(base, file_name)
+                    if os.path.exists(path):
+                        print(f"  -> Found {path}")
+        print("🎉 registry.load_all() complete!")
         return self.models, self.vectorizer, self.nlp
 
 registry = ModelRegistry()
 
-
 def get_bg_url():
     import os
     try:
-        # Check standard relative path for Docker/HF
         path = "static/background.png"
         if os.path.exists(path):
             print(f"✅ Background Image verified at: {path}")
-            return f"/file={os.path.abspath(path).replace('\\', '/')}"
+            import base64
+            with open(path, "rb") as f:
+                data = base64.b64encode(f.read()).decode()
+            return f"data:image/png;base64,{data}"
         print("❌ Background Image NOT FOUND at static/background.png")
         return ""
     except Exception as e:
@@ -106,12 +120,15 @@ def get_bg_url():
 
 bg_url = get_bg_url()
 
-# 3. ROBUST CSS
+# 3. CUSTOM CSS - EXACT REPLICA
 custom_css = f"""
+<style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
 
-html, body, .gradio-app, .gradio-container {{
-    background: transparent !important;
+html, body, .stApp {{
+    background: linear-gradient(rgba(10, 14, 42, 0.72), rgba(10, 14, 42, 0.72)), 
+                url('{bg_url}') no-repeat center center fixed !important;
+    background-size: cover !important;
     margin: 0 !important;
     padding: 0 !important;
     min-height: 100vh !important;
@@ -119,192 +136,257 @@ html, body, .gradio-app, .gradio-container {{
     font-family: 'Inter', sans-serif !important;
 }}
 
-.gradio-container {{ 
-    max-width: 950px !important; 
-    margin: 30px auto !important; 
-    border: none !important; 
-    box-shadow: none !important; 
-    background: transparent !important;
+.stApp > header {{
+    background-color: transparent !important;
 }}
 
-/* Force all internal divs to be transparent */
-div {{ background-color: transparent !important; }}
-.main-card {{ background: rgba(17, 23, 53, 0.82) !important; }} /* Except our cards */
+.main .block-container {{
+    max-width: 950px !important;
+    padding-top: 2rem !important;
+    padding-bottom: 2rem !important;
+}}
 
-/* Cards & Layout */
+/* Hide Streamlit branding */
+#MainMenu {{visibility: hidden;}}
+footer {{visibility: hidden;}}
+header {{visibility: hidden;}}
+
+/* Card styling */
 .main-card {{
-    background: rgba(17, 23, 53, 0.8) !important;
+    background: rgba(17, 23, 53, 0.82) !important;
     border: 1px solid rgba(139, 92, 246, 0.4) !important;
     border-radius: 12px !important;
     padding: 24px !important;
     box-shadow: 0 10px 40px rgba(0, 0, 0, 0.7) !important;
+    margin-bottom: 20px !important;
 }}
 
-textarea {{
+/* Text area styling */
+.stTextArea textarea {{
     background: rgba(15, 23, 42, 0.95) !important;
     border: 1px solid #334155 !important;
     color: #f8fafc !important;
     border-radius: 8px !important;
+    font-family: 'Inter', sans-serif !important;
+    font-size: 15px !important;
 }}
 
-.analyze-btn {{
+/* Button styling */
+.stButton > button {{
     background: linear-gradient(90deg, #7c3aed, #db2777) !important;
-    height: 56px !important; font-size: 18px !important; font-weight: 800 !important;
-    box-shadow: 0 4px 25px rgba(124, 58, 237, 0.5) !important; border: none !important;
+    height: 56px !important;
+    font-size: 18px !important;
+    font-weight: 800 !important;
+    box-shadow: 0 4px 25px rgba(124, 58, 237, 0.5) !important;
+    border: none !important;
+    color: white !important;
+    border-radius: 8px !important;
+    width: 100% !important;
+    transition: all 0.3s ease !important;
 }}
 
-.sample-btn {{ background: #5b21b6 !important; border: none !important; }}
+.stButton > button:hover {{
+    box-shadow: 0 6px 35px rgba(124, 58, 237, 0.7) !important;
+    transform: translateY(-2px);
+}}
 
-/* Custom Output Grid */
-.output-grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 25px; }}
-.output-item {{ background: rgba(15, 23, 42, 0.6); border: 1px solid #1e293b; padding: 18px; border-radius: 10px; }}
-.output-label {{ font-size: 14px; font-weight: 600; color: #94a3b8; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }}
-.output-val {{ font-size: 26px !important; font-weight: 800 !important; display: block; }}
+/* Sample button specific */
+button[kind="secondary"] {{
+    background: #5b21b6 !important;
+    border: none !important;
+}}
 
-footer {{ display: none !important; }}
+/* Output grid */
+.output-grid {{
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin-bottom: 25px;
+}}
+
+.output-item {{
+    background: rgba(15, 23, 42, 0.6);
+    border: 1px solid #1e293b;
+    padding: 18px;
+    border-radius: 10px;
+}}
+
+.output-label {{
+    font-size: 14px;
+    font-weight: 600;
+    color: #94a3b8;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}}
+
+.output-val {{
+    font-size: 26px !important;
+    font-weight: 800 !important;
+    display: block;
+}}
+
+/* Ensure all divs have transparent background except cards */
+div {{
+    background-color: transparent !important;
+}}
+
+.main-card, .output-item {{
+    background: rgba(17, 23, 53, 0.82) !important;
+}}
+</style>
 """
 
-def analyze_complaint(text):
-    if not text or len(text.strip()) < 5: return gr.update(visible=False), ""
-    models, vectorizer, nlp = registry.load_all()
-    if not models or not vectorizer: return gr.update(visible=True), "<h1>Model Load Error</h1>"
+st.markdown(custom_css, unsafe_allow_html=True)
 
+# 4. HEADER
+st.markdown("""
+<div style="text-align: center; margin-bottom: 30px; margin-top: 20px;">
+    <div style="font-size: 48px; font-weight: 800; display: flex; align-items: center; justify-content: center; gap: 20px; color: #ffffff;">
+        <span style="font-size: 56px; line-height: 1; filter: drop-shadow(0 0 10px rgba(168, 85, 247, 0.5));">🤖</span>
+        <span style="background: linear-gradient(90deg, #a855f7, #ffffff); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">CFPB Complaint Intelligence</span>
+    </div>
+    <div style="color: #cbd5e1; font-size: 18px; margin-top: 8px;">Strategic ML Monitoring System for Smarter Complaint Analysis</div>
+</div>
+""", unsafe_allow_html=True)
+
+# 5. MAIN CARD WRAPPER
+st.markdown('<div class="main-card">', unsafe_allow_html=True)
+
+# Input section header with sample button
+col1, col2 = st.columns([4, 1])
+with col1:
+    st.markdown('<div style="font-size: 18px; font-weight: 600; color: #fff; display: flex; align-items: center; gap: 8px; margin-bottom: 10px;">🚀 Enter Complaint</div>', unsafe_allow_html=True)
+with col2:
+    if st.button("✨ Use Sample Input", key="sample_btn", type="secondary"):
+        st.session_state['complaint_text'] = random.choice(sample_inputs)
+        st.rerun()
+
+# Text area
+complaint_text = st.text_area(
+    label="",
+    value=st.session_state.get('complaint_text', ''),
+    placeholder="Type or paste the complaint here...",
+    height=120,
+    max_chars=1000,
+    key="complaint_input",
+    label_visibility="collapsed"
+)
+
+# Character counter
+char_count = len(complaint_text)
+color = "#ef4444" if char_count > 1000 else "#64748b"
+st.markdown(f'<div style="text-align: right; color: {color}; font-size: 12px; margin-top: 4px;">{char_count} / 1000 characters</div>', unsafe_allow_html=True)
+
+# Analyze button
+analyze_clicked = st.button("🚀 Analyze Now", key="analyze_btn")
+
+st.markdown('</div>', unsafe_allow_html=True)  # Close main-card
+
+# 6. ANALYSIS LOGIC
+def analyze_complaint(text):
+    if not text or len(text.strip()) < 5:
+        return None
+    
+    models, vectorizer, nlp = registry.load_all()
+    if not models or not vectorizer:
+        return None
+    
     text_clean = clean_and_lemmatize(text)
     X = vectorizer.transform([text_clean])
+    
     product = models['product'].predict(X)[0]
     sub_product = models['sub_product'].predict(X)[0]
     issue = models['issue'].predict(X)[0]
     priority = models['priority'].predict(X)[0]
-    
-    # 1. Custom Grid HTML
-    p_color = "#10b981" if priority == "Low" else "#ef4444"
     prob = round(random.uniform(76.0, 95.0), 1)
     
-    # 2. Extract Top Features for Explainability
+    # Extract top features
     try:
         feature_names = vectorizer.get_feature_names_out()
         sorted_items = sorted(zip(X.tocoo().col, X.tocoo().data), key=lambda x: x[1], reverse=True)
         top_words = [feature_names[i] for i, score in sorted_items[:5]]
     except:
         top_words = text_clean.split()[:5]
+    
+    return product, sub_product, issue, priority, prob, top_words
+
+# 7. DISPLAY RESULTS
+if analyze_clicked and complaint_text and len(complaint_text.strip()) >= 5:
+    with st.spinner("Analyzing complaint..."):
+        result = analyze_complaint(complaint_text)
         
-    keywords_html = "".join([f'<span style="background: rgba(124, 58, 237, 0.2); color: #c084fc; border: 1px solid rgba(124, 58, 237, 0.4); padding: 4px 12px; border-radius: 6px; font-weight: 600; font-size: 13px;">{word.upper()}</span>' for word in top_words])
-    
-    grid_html = f"""
-    <div class="output-grid">
-        <div class="output-item">
-            <div class="output-label">📦 Product</div>
-            <div class="output-val" style="color: #ffffff;">{product}</div>
-        </div>
-        <div class="output-item">
-            <div class="output-label">🏷️ Sub-product</div>
-            <div class="output-val" style="color: #ffffff;">{sub_product}</div>
-        </div>
-        <div class="output-item">
-            <div class="output-label">⚠️ Issue</div>
-            <div class="output-val" style="color: #f59e0b;">{issue}</div>
-        </div>
-        <div class="output-item">
-            <div class="output-label">🚩 Priority</div>
-            <div class="output-val" style="color: {p_color};">{priority}</div>
-        </div>
-    </div>
-    
-    <div style="background: rgba(15, 23, 42, 0.8); border: 1px solid #334155; border-radius: 10px; padding: 20px; display: flex; align-items: center; gap: 25px;">
-        <div style="width: 64px; height: 64px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 32px; color: {p_color}; background: {p_color}11; border: 2px solid {p_color}33;">🛡️</div>
-        <div style="flex-grow: 1;">
-            <div style="font-size: 14px; color: #94a3b8;">Prediction Status</div>
-            <div style="font-size: 26px; font-weight: 800; color: {p_color}; margin: 4px 0;">{priority} Urgency Detected</div>
-            <div style="font-size: 14px; color: #cbd5e1;">Confidence Score: {prob}%</div>
-            <div style="width: 100%; height: 8px; background: #1e293b; border-radius: 4px; margin-top: 12px; overflow: hidden;">
-                <div style="height: 100%; width: {prob}%; background: {p_color}; box-shadow: 0 0 10px {p_color};"></div>
+        if result:
+            product, sub_product, issue, priority, prob, top_words = result
+            
+            # Color coding
+            p_color = "#10b981" if priority == "Low" else "#ef4444"
+            
+            # Keywords HTML
+            keywords_html = "".join([f'<span style="background: rgba(124, 58, 237, 0.2); color: #c084fc; border: 1px solid rgba(124, 58, 237, 0.4); padding: 4px 12px; border-radius: 6px; font-weight: 600; font-size: 13px; margin-right: 8px; display: inline-block; margin-bottom: 8px;">{word.upper()}</span>' for word in top_words])
+            
+            # Output card
+            st.markdown('<div class="main-card">', unsafe_allow_html=True)
+            
+            st.markdown(f"""
+            <div class="output-grid">
+                <div class="output-item">
+                    <div class="output-label">📦 Product</div>
+                    <div class="output-val" style="color: #ffffff;">{product}</div>
+                </div>
+                <div class="output-item">
+                    <div class="output-label">🏷️ Sub-product</div>
+                    <div class="output-val" style="color: #ffffff;">{sub_product}</div>
+                </div>
+                <div class="output-item">
+                    <div class="output-label">⚠️ Issue</div>
+                    <div class="output-val" style="color: #f59e0b;">{issue}</div>
+                </div>
+                <div class="output-item">
+                    <div class="output-label">🚩 Priority</div>
+                    <div class="output-val" style="color: {p_color};">{priority}</div>
+                </div>
             </div>
-        </div>
-    </div>
-    
-    <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid #1e293b; border-radius: 10px; padding: 20px; margin-top: 20px;">
-        <div style="font-size: 14px; font-weight: 600; color: #94a3b8; margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
-            🧠 Predictor Rationale & Key Words
-        </div>
-        <div style="font-size: 15px; color: #cbd5e1; line-height: 1.6;">
-            The ML ensemble successfully categorized this complaint by identifying maximum TF-IDF vector weights. The following extracted keywords were critical in routing this to <b>{product}</b>:
-        </div>
-        <div style="display: flex; gap: 10px; margin-top: 15px; flex-wrap: wrap;">
-            {keywords_html}
-        </div>
-    </div>
-    """
-    return gr.update(visible=True), grid_html
+            
+            <div style="background: rgba(15, 23, 42, 0.8); border: 1px solid #334155; border-radius: 10px; padding: 20px; display: flex; align-items: center; gap: 25px;">
+                <div style="width: 64px; height: 64px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 32px; color: {p_color}; background: {p_color}11; border: 2px solid {p_color}33;">🛡️</div>
+                <div style="flex-grow: 1;">
+                    <div style="font-size: 14px; color: #94a3b8;">Prediction Status</div>
+                    <div style="font-size: 26px; font-weight: 800; color: {p_color}; margin: 4px 0;">{priority} Urgency Detected</div>
+                    <div style="font-size: 14px; color: #cbd5e1;">Confidence Score: {prob}%</div>
+                    <div style="width: 100%; height: 8px; background: #1e293b; border-radius: 4px; margin-top: 12px; overflow: hidden;">
+                        <div style="height: 100%; width: {prob}%; background: {p_color}; box-shadow: 0 0 10px {p_color};"></div>
+                    </div>
+                </div>
+            </div>
+            
+            <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid #1e293b; border-radius: 10px; padding: 20px; margin-top: 20px;">
+                <div style="font-size: 14px; font-weight: 600; color: #94a3b8; margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+                    🧠 Predictor Rationale & Key Words
+                </div>
+                <div style="font-size: 15px; color: #cbd5e1; line-height: 1.6;">
+                    The ML ensemble successfully categorized this complaint by identifying maximum TF-IDF vector weights. The following extracted keywords were critical in routing this to <b>{product}</b>:
+                </div>
+                <div style="display: flex; gap: 10px; margin-top: 15px; flex-wrap: wrap;">
+                    {keywords_html}
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            st.markdown('</div>', unsafe_allow_html=True)
 
-with gr.Blocks(title="CFPB AI Intelligence") as demo:
-    gr.HTML(f"""
-    <style>
-    html {{
-        background: linear-gradient(rgba(10, 14, 42, 0.72), rgba(10, 14, 42, 0.72)), 
-                    url('{bg_url}') no-repeat center center fixed !important;
-        background-size: cover !important;
-    }}
-    body {{ background: transparent !important; }}
-    </style>
-    """)
-    # Header
-    gr.HTML("""
-    <div style="text-align: center; margin-bottom: 30px; margin-top: 20px;">
-        <div style="font-size: 48px; font-weight: 800; display: flex; align-items: center; justify-content: center; gap: 20px; color: #ffffff;">
-            <span style="font-size: 56px; line-height: 1; filter: drop-shadow(0 0 10px rgba(168, 85, 247, 0.5));">🤖</span>
-            <span style="background: linear-gradient(90deg, #a855f7, #ffffff); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">CFPB Complaint Intelligence</span>
-        </div>
-        <div style="color: #cbd5e1; font-size: 18px; margin-top: 8px;">Strategic ML Monitoring System for Smarter Complaint Analysis</div>
-    </div>
-    """)
-    
-    with gr.Column(elem_classes="main-card"):
-        with gr.Row():
-            gr.HTML('<div style="font-size: 18px; font-weight: 600; color: #fff; display: flex; align-items: center; gap: 8px;">🚀 Enter Complaint</div>')
-            sample_btn = gr.Button("✨ Use Sample Input", elem_classes="sample-btn", scale=0)
-        inp = gr.Textbox(placeholder="Type or paste the complaint here...", show_label=False, lines=5)
-        char_counter = gr.HTML('<div style="text-align: right; color: #64748b; font-size: 12px; margin-top: 4px;">0 / 1000 characters</div>')
-        btn = gr.Button("🚀 Analyze Now", elem_classes="analyze-btn")
+# 8. FOOTER
+st.markdown("""
+<div style="display: flex; justify-content: space-between; font-size: 13px; color: #64748b; margin-top: 40px; border-top: 1px solid #1e293b; padding-top: 20px;">
+    <div>🛡️ Secure • Private • Confidential</div>
+    <div>Powered by <span style="color: #7c3aed; font-weight: 600;">Machine Learning</span></div>
+    <div style="background: rgba(91, 33, 182, 0.3); padding: 2px 8px; border-radius: 4px;">Total Sample Inputs: 35</div>
+</div>
+""", unsafe_allow_html=True)
 
-    # Output Section (Pure HTML to force layout)
-    with gr.Column(visible=False, elem_classes="main-card") as out_sec:
-        out_html = gr.HTML()
-    
-    gr.HTML("""
-    <div style="display: flex; justify-content: space-between; font-size: 13px; color: #64748b; margin-top: 40px; border-top: 1px solid #1e293b; padding-top: 20px;">
-        <div>🛡️ Secure • Private • Confidential</div>
-        <div>Powered by <span style="color: #7c3aed; font-weight: 600;">Machine Learning</span></div>
-        <div style="background: rgba(91, 33, 182, 0.3); padding: 2px 8px; border-radius: 4px;">Total Sample Inputs: 40</div>
-    </div>
-    """)
-
-    def update_char_count(text):
-        count = len(text)
-        color = "#ef4444" if count > 1000 else "#64748b"
-        return f'<div style="text-align: right; color: {color}; font-size: 12px; margin-top: 4px;">{count} / 1000 characters</div>'
-
-    # Events
-    inp.change(update_char_count, inputs=inp, outputs=char_counter)
-    
-    def use_sample_action():
-        text = use_sample()
-        return text, update_char_count(text)
-        
-    sample_btn.click(use_sample_action, outputs=[inp, char_counter])
-    btn.click(analyze_complaint, inp, [out_sec, out_html])
-
-if __name__ == "__main__":
-    # Warm up models at boot for HF stability
+# Initialize models on startup
+if 'models_loaded' not in st.session_state:
     print("🚀 Initializing Model Registry...")
     registry.load_all()
-    
-    is_docker = os.path.exists('/.dockerenv') or os.environ.get('HF_HUB_HTTP_ENDPOINT')
-    server_name = "0.0.0.0" if is_docker else "127.0.0.1"
-    
-    print(f"📡 Starting server on {server_name}:7860")
-    demo.launch(
-        server_name=server_name, 
-        server_port=7860,
-        css=custom_css,
-        allowed_paths=["static"]
-    )
+    st.session_state['models_loaded'] = True
