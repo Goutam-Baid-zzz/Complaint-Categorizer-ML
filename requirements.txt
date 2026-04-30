@@ -1,12 +1,12 @@
 pandas
 numpy
-scikit-learn
+scikit-learn==1.8.0
 spacy
 imbalanced-learn
 matplotlib
 seaborn
 tqdm
-gradio>=5.0.0
+streamlit>=1.28.0
 Pillow
 requests
 gdown
