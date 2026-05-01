@@ -1,6 +1,6 @@
 
 # Core Data Processing (Pre-built wheels only)
-pandas==2.2.2
+pandas==2.2.0
 numpy==1.26.4
 
 # Machine Learning
@@ -15,8 +15,8 @@ seaborn==0.13.1
 spacy==3.7.2
 en_core_web_sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1-py3-none-any.whl
 
-# Image Processing - Pre-built wheel
-Pillow==10.2.0
+# Image Processing - Use older stable version (avoids build issues)
+Pillow==9.5.0
 
 # Utilities
 tqdm==4.66.2
