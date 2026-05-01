@@ -5,6 +5,17 @@ import os
 import random
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Try importing gdown — fail visibly if not installed
+# ──────────────────────────────────────────────────────────────────────────────
+try:
+    import gdown
+except ImportError:
+    st.error(
+        "❌ `gdown` is not installed. Add `gdown` to your requirements.txt and redeploy."
+    )
+    st.stop()
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Try importing spaCy — fail visibly if not installed
 # ──────────────────────────────────────────────────────────────────────────────
 try:
@@ -74,9 +85,20 @@ while len(sample_inputs) < 40:
     sample_inputs.append(random.choice(sample_inputs))
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 2. MODEL REGISTRY  (Singleton — loads once per Streamlit process)
+# 2. GOOGLE DRIVE FILE REGISTRY + DOWNLOADER
 # ──────────────────────────────────────────────────────────────────────────────
 MODEL_DIR = "models"
+
+# Maps local filename → Google Drive file ID
+GDRIVE_FILES = {
+    "product_model_v2.pkl":     "1MWnw-X4yRHWRTw8NYb2XdLFPdoFEPWgi",
+    "sub_product_model_v2.pkl": "1y5BVXnmMek1aGvHJ_88G4c0HdtoHSg8c",
+    "issue_model_v2.pkl":       "1ItfFC3KbYxUD1guFUn5ZejjoKsJ6-fnn",
+    "priority_model_v2.pkl":    "1ZmDCuMnPA7zLfEu2DKOwe4Bwil58aAxg",
+    "tfidf_vectorizer_v2.pkl":  "1IBobv4wgqEGGtMpIXbiwjJCb6YHvxa0o",
+}
+
+# Logical key → filename mapping (used by the registry)
 REQUIRED_FILES = {
     "product":     "product_model_v2.pkl",
     "sub_product": "sub_product_model_v2.pkl",
@@ -86,6 +108,50 @@ REQUIRED_FILES = {
 VECTORIZER_FILE = "tfidf_vectorizer_v2.pkl"
 
 
+def download_models() -> list[str]:
+    """
+    Download all model files from Google Drive into MODEL_DIR.
+    Skips files that already exist locally.
+
+    Returns a list of error strings (empty list = all good).
+    """
+    errors: list[str] = []
+
+    try:
+        os.makedirs(MODEL_DIR, exist_ok=True)
+    except OSError as e:
+        return [f"Could not create `{MODEL_DIR}` directory: {e}"]
+
+    for filename, file_id in GDRIVE_FILES.items():
+        output_path = os.path.join(MODEL_DIR, filename)
+
+        if os.path.exists(output_path):
+            # Already cached — skip download
+            continue
+
+        url = f"https://drive.google.com/uc?id={file_id}"
+        try:
+            result = gdown.download(url, output_path, quiet=False)
+            if result is None:
+                # gdown returns None when the download fails (e.g. permission error)
+                errors.append(
+                    f"Failed to download `{filename}` from Google Drive. "
+                    "Ensure the file is shared as 'Anyone with the link can view'."
+                )
+                # Remove any partial file so the next run retries cleanly
+                if os.path.exists(output_path):
+                    os.remove(output_path)
+        except Exception as e:
+            errors.append(f"Exception while downloading `{filename}`: {e}")
+            if os.path.exists(output_path):
+                os.remove(output_path)
+
+    return errors
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 3. MODEL REGISTRY  (Singleton — loads once per Streamlit process)
+# ──────────────────────────────────────────────────────────────────────────────
 class ModelRegistry:
     _instance = None
 
@@ -100,40 +166,50 @@ class ModelRegistry:
         return cls._instance
 
     def load_all(self):
-        """Load all artifacts exactly once.  Returns (models, vectorizer, nlp)."""
+        """Download (if needed) and load all artifacts exactly once.
+        Returns (models, vectorizer, nlp).
+        """
         if self._loaded:
             return self.models, self.vectorizer, self.nlp
 
         self._load_errors = []
 
-        # ── spaCy ──────────────────────────────────────────────────────────────
-        # Do NOT download at runtime — the model must be in requirements.txt
-        # or installed in the Docker image via:  python -m spacy download en_core_web_sm
+        # ── Step 1: download model files from Google Drive ─────────────────────
+        download_errors = download_models()
+        self._load_errors.extend(download_errors)
+
+        # ── Step 2: load spaCy ─────────────────────────────────────────────────
+        # Do NOT download at runtime — must be installed via build command:
+        #   python -m spacy download en_core_web_sm
         try:
             self.nlp = spacy.load("en_core_web_sm", disable=["parser", "ner"])
         except OSError:
             self._load_errors.append(
                 "spaCy model `en_core_web_sm` not found. "
                 "Add `en-core-web-sm` to requirements.txt or run "
-                "`python -m spacy download en_core_web_sm` in your build command."
+                "`python -m spacy download en_core_web_sm` in your Render build command."
             )
             self.nlp = None
 
-        # ── sklearn models ─────────────────────────────────────────────────────
+        # ── Step 3: load sklearn models ────────────────────────────────────────
         for key, filename in REQUIRED_FILES.items():
             path = os.path.join(MODEL_DIR, filename)
             if not os.path.exists(path):
-                self._load_errors.append(f"Model file not found: `{path}`")
+                self._load_errors.append(
+                    f"Model file still missing after download attempt: `{path}`"
+                )
                 continue
             try:
                 self.models[key] = joblib.load(path)
             except Exception as e:
                 self._load_errors.append(f"Failed to load `{filename}`: {e}")
 
-        # ── vectorizer ─────────────────────────────────────────────────────────
+        # ── Step 4: load vectorizer ────────────────────────────────────────────
         vec_path = os.path.join(MODEL_DIR, VECTORIZER_FILE)
         if not os.path.exists(vec_path):
-            self._load_errors.append(f"Vectorizer file not found: `{vec_path}`")
+            self._load_errors.append(
+                f"Vectorizer still missing after download attempt: `{vec_path}`"
+            )
         else:
             try:
                 self.vectorizer = joblib.load(vec_path)
@@ -148,7 +224,7 @@ registry = ModelRegistry()
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 3. BACKGROUND IMAGE
+# 4. BACKGROUND IMAGE
 # ──────────────────────────────────────────────────────────────────────────────
 def get_bg_url():
     path = "static/background.png"
@@ -166,7 +242,7 @@ def get_bg_url():
 bg_url = get_bg_url()
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 4. CUSTOM CSS  (unchanged from original)
+# 5. CUSTOM CSS  (unchanged from original)
 # ──────────────────────────────────────────────────────────────────────────────
 custom_css = f"""
 <style>
@@ -271,7 +347,7 @@ div {{ background-color: transparent !important; }}
 st.markdown(custom_css, unsafe_allow_html=True)
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 5. HEADER
+# 6. HEADER
 # ──────────────────────────────────────────────────────────────────────────────
 st.markdown("""
 <div style="text-align: center; margin-bottom: 30px; margin-top: 20px;">
@@ -291,7 +367,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 6. INPUT CARD
+# 7. INPUT CARD
 # ──────────────────────────────────────────────────────────────────────────────
 st.markdown('<div class="main-card">', unsafe_allow_html=True)
 
@@ -331,7 +407,7 @@ analyze_clicked = st.button("🚀 Analyze Now", key="analyze_btn")
 st.markdown("</div>", unsafe_allow_html=True)  # close main-card
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 7. ANALYSIS LOGIC
+# 8. ANALYSIS LOGIC
 # ──────────────────────────────────────────────────────────────────────────────
 def analyze_complaint(text: str):
     """
@@ -356,14 +432,16 @@ def analyze_complaint(text: str):
     if missing_models:
         st.error(
             f"❌ The following models did not load: {missing_models}. "
-            "Check that all `.pkl` files are committed to your repository under `models/`."
+            "Download may have failed — check that each Google Drive file is shared "
+            "as 'Anyone with the link can view' and that `gdown` is in requirements.txt."
         )
         return None
 
     if vectorizer is None:
         st.error(
             "❌ Vectorizer did not load. "
-            "Ensure `models/tfidf_vectorizer_v2.pkl` exists in the repository."
+            "Download may have failed — verify the Google Drive link for "
+            "`tfidf_vectorizer_v2.pkl` is publicly accessible."
         )
         return None
 
@@ -406,7 +484,7 @@ def analyze_complaint(text: str):
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 8. DISPLAY RESULTS
+# 9. DISPLAY RESULTS
 # ──────────────────────────────────────────────────────────────────────────────
 if analyze_clicked:
     if not complaint_text or len(complaint_text.strip()) < 5:
@@ -492,7 +570,7 @@ if analyze_clicked:
             st.markdown("</div>", unsafe_allow_html=True)
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 9. FOOTER
+# 10. FOOTER
 # ──────────────────────────────────────────────────────────────────────────────
 st.markdown("""
 <div style="display: flex; justify-content: space-between; font-size: 13px; color: #64748b;
@@ -506,11 +584,12 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 10. WARM-UP  — load models once at startup so first click is instant
+# 11. WARM-UP  — load models once at startup so first click is instant
 # ──────────────────────────────────────────────────────────────────────────────
 if "models_loaded" not in st.session_state:
-    registry.load_all()
-    # Surface any load errors immediately on startup
+    with st.spinner("⏳ Downloading & loading ML models on first run — please wait..."):
+        registry.load_all()
+    # Surface any load/download errors immediately on startup
     if registry._load_errors:
         for err in registry._load_errors:
             st.warning(f"⚠️ Startup warning — {err}")
