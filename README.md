@@ -102,33 +102,6 @@ streamlit run app.py
 
 ---
 
-## 🐳 Docker Deployment
-
-Build and run the application using Docker:
-
-```bash
-# Build the Docker image
-docker build -t cfpb-intelligence .
-
-# Run the container
-docker run -p 8501:8501 cfpb-intelligence
-```
-
-Access the app at `http://localhost:8501`
-
----
-
-## ☁️ Streamlit Cloud Deployment
-
-1. Push your code to GitHub
-2. Go to [share.streamlit.io](https://share.streamlit.io)
-3. Connect your GitHub repository
-4. Select `app.py` as the main file
-5. Click "Deploy"
-6. Your app will be live at `https://[your-app-name].streamlit.app`
-
----
-
 ## 📁 Project Structure
 ```bash
 .
