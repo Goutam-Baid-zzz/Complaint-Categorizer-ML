@@ -150,24 +150,24 @@ def download_models() -> list[str]:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 3. MODEL REGISTRY  (Singleton — loads once per Streamlit process)
+# 3. MODEL REGISTRY  — lazy, cached via @st.cache_resource
+#    Nothing is downloaded or loaded at import time.
+#    load_all() is called only when the user clicks "Analyze Now".
+#    @st.cache_resource ensures the result is reused for every subsequent run
+#    within the same Streamlit server process (no re-download, no re-load).
 # ──────────────────────────────────────────────────────────────────────────────
 class ModelRegistry:
-    _instance = None
-
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance.models = {}
-            cls._instance.vectorizer = None
-            cls._instance.nlp = None
-            cls._instance._loaded = False
-            cls._instance._load_errors = []
-        return cls._instance
+    def __init__(self):
+        self.models: dict = {}
+        self.vectorizer = None
+        self.nlp = None
+        self._loaded: bool = False
+        self._load_errors: list[str] = []
 
     def load_all(self):
         """Download (if needed) and load all artifacts exactly once.
         Returns (models, vectorizer, nlp).
+        Safe to call repeatedly — skips work after the first successful load.
         """
         if self._loaded:
             return self.models, self.vectorizer, self.nlp
@@ -179,7 +179,7 @@ class ModelRegistry:
         self._load_errors.extend(download_errors)
 
         # ── Step 2: load spaCy ─────────────────────────────────────────────────
-        # Do NOT download at runtime — must be installed via build command:
+        # Must be pre-installed — add to your Render build command:
         #   python -m spacy download en_core_web_sm
         try:
             self.nlp = spacy.load("en_core_web_sm", disable=["parser", "ner"])
@@ -220,7 +220,19 @@ class ModelRegistry:
         return self.models, self.vectorizer, self.nlp
 
 
-registry = ModelRegistry()
+@st.cache_resource
+def get_registry() -> ModelRegistry:
+    """
+    Return a single shared ModelRegistry instance for the lifetime of the
+    Streamlit server process.  @st.cache_resource means this function body
+    runs exactly once — subsequent calls return the same object instantly,
+    with no downloading or loading.  The registry is NOT populated here;
+    load_all() is deferred until the user first clicks Analyze Now.
+    """
+    return ModelRegistry()
+
+
+registry = get_registry()
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -347,7 +359,7 @@ div {{ background-color: transparent !important; }}
 st.markdown(custom_css, unsafe_allow_html=True)
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 6. HEADER
+# 5. HEADER
 # ──────────────────────────────────────────────────────────────────────────────
 st.markdown("""
 <div style="text-align: center; margin-bottom: 30px; margin-top: 20px;">
@@ -367,7 +379,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 7. INPUT CARD
+# 6. INPUT CARD
 # ──────────────────────────────────────────────────────────────────────────────
 st.markdown('<div class="main-card">', unsafe_allow_html=True)
 
@@ -407,7 +419,7 @@ analyze_clicked = st.button("🚀 Analyze Now", key="analyze_btn")
 st.markdown("</div>", unsafe_allow_html=True)  # close main-card
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 8. ANALYSIS LOGIC
+# 7. ANALYSIS LOGIC
 # ──────────────────────────────────────────────────────────────────────────────
 def analyze_complaint(text: str):
     """
@@ -484,13 +496,13 @@ def analyze_complaint(text: str):
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 9. DISPLAY RESULTS
+# 8. DISPLAY RESULTS
 # ──────────────────────────────────────────────────────────────────────────────
 if analyze_clicked:
     if not complaint_text or len(complaint_text.strip()) < 5:
         st.warning("⚠️ Please enter a complaint with at least 5 characters before analyzing.")
     else:
-        with st.spinner("Analyzing complaint..."):
+        with st.spinner("⏳ Loading models & analyzing complaint — this may take a moment on first run..."):
             result = analyze_complaint(complaint_text)
 
         if result:
@@ -570,7 +582,7 @@ if analyze_clicked:
             st.markdown("</div>", unsafe_allow_html=True)
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 10. FOOTER
+# 9. FOOTER
 # ──────────────────────────────────────────────────────────────────────────────
 st.markdown("""
 <div style="display: flex; justify-content: space-between; font-size: 13px; color: #64748b;
@@ -584,7 +596,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 11. WARM-UP  — load models once at startup so first click is instant
+# 10. WARM-UP  — load models once at startup so first click is instant
 # ──────────────────────────────────────────────────────────────────────────────
 if "models_loaded" not in st.session_state:
     with st.spinner("⏳ Downloading & loading ML models on first run — please wait..."):
