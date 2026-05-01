@@ -2,19 +2,38 @@ import streamlit as st
 import pandas as pd
 import joblib
 import os
-import spacy
 import random
-from src.utils.text_utils import clean_and_lemmatize
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Try importing spaCy — fail visibly if not installed
+# ──────────────────────────────────────────────────────────────────────────────
+try:
+    import spacy
+except ImportError:
+    st.error(
+        "❌ spaCy is not installed. Add `spacy` to your requirements.txt and redeploy."
+    )
+    st.stop()
+
+try:
+    from src.utils.text_utils import clean_and_lemmatize
+except ImportError as e:
+    st.error(f"❌ Could not import text utilities: {e}")
+    st.stop()
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Page configuration
+# ──────────────────────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="CFPB AI Intelligence",
     page_icon="🤖",
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="collapsed",
 )
 
-# 1. ENHANCED SAMPLE DATA
+# ──────────────────────────────────────────────────────────────────────────────
+# 1. SAMPLE DATA
+# ──────────────────────────────────────────────────────────────────────────────
 sample_inputs = [
     "I applied for a personal loan last month and received approval, but the amount has still not been credited to my account despite multiple follow-ups with the bank.",
     "My credit card was charged twice for the same transaction, and even after raising a complaint, the duplicate amount has not been refunded yet.",
@@ -49,84 +68,112 @@ sample_inputs = [
     "A payment I made has not been reflected in the recipient's account even after successful deduction.",
     "There has been a duplicate deduction of EMI for my loan in the same billing cycle.",
     "The mobile banking app crashed during a transaction, but the amount was still deducted.",
-    "I suspect there is a security issue in my account as I am seeing unfamiliar activity."
+    "I suspect there is a security issue in my account as I am seeing unfamiliar activity.",
 ]
-while len(sample_inputs) < 40: 
+while len(sample_inputs) < 40:
     sample_inputs.append(random.choice(sample_inputs))
 
-# 2. MODEL REGISTRY
+# ──────────────────────────────────────────────────────────────────────────────
+# 2. MODEL REGISTRY  (Singleton — loads once per Streamlit process)
+# ──────────────────────────────────────────────────────────────────────────────
+MODEL_DIR = "models"
+REQUIRED_FILES = {
+    "product":     "product_model_v2.pkl",
+    "sub_product": "sub_product_model_v2.pkl",
+    "issue":       "issue_model_v2.pkl",
+    "priority":    "priority_model_v2.pkl",
+}
+VECTORIZER_FILE = "tfidf_vectorizer_v2.pkl"
+
+
 class ModelRegistry:
     _instance = None
+
     def __new__(cls):
         if cls._instance is None:
-            cls._instance = super(ModelRegistry, cls).__new__(cls)
+            cls._instance = super().__new__(cls)
             cls._instance.models = {}
             cls._instance.vectorizer = None
             cls._instance.nlp = None
+            cls._instance._loaded = False
+            cls._instance._load_errors = []
         return cls._instance
 
     def load_all(self):
-        if not self.models:
-            print("🧠 Loading models...")
-            try:
-                print("  -> Loading spacy...")
-                self.nlp = spacy.load("en_core_web_sm", disable=["parser", "ner"])
-            except:
-                print("  -> Downloading spacy...")
-                os.system("python -m spacy download en_core_web_sm")
-                self.nlp = spacy.load("en_core_web_sm", disable=["parser", "ner"])
-            print("  ✅ Spacy loaded!")
+        """Load all artifacts exactly once.  Returns (models, vectorizer, nlp)."""
+        if self._loaded:
+            return self.models, self.vectorizer, self.nlp
 
-            base = "models"
+        self._load_errors = []
+
+        # ── spaCy ──────────────────────────────────────────────────────────────
+        # Do NOT download at runtime — the model must be in requirements.txt
+        # or installed in the Docker image via:  python -m spacy download en_core_web_sm
+        try:
+            self.nlp = spacy.load("en_core_web_sm", disable=["parser", "ner"])
+        except OSError:
+            self._load_errors.append(
+                "spaCy model `en_core_web_sm` not found. "
+                "Add `en-core-web-sm` to requirements.txt or run "
+                "`python -m spacy download en_core_web_sm` in your build command."
+            )
+            self.nlp = None
+
+        # ── sklearn models ─────────────────────────────────────────────────────
+        for key, filename in REQUIRED_FILES.items():
+            path = os.path.join(MODEL_DIR, filename)
+            if not os.path.exists(path):
+                self._load_errors.append(f"Model file not found: `{path}`")
+                continue
             try:
-                print("  -> Loading product_model...")
-                self.models['product'] = joblib.load(f"{base}/product_model_v2.pkl")
-                print("  -> Loading sub_product_model...")
-                self.models['sub_product'] = joblib.load(f"{base}/sub_product_model_v2.pkl")
-                print("  -> Loading issue_model...")
-                self.models['issue'] = joblib.load(f"{base}/issue_model_v2.pkl")
-                print("  -> Loading priority_model...")
-                self.models['priority'] = joblib.load(f"{base}/priority_model_v2.pkl")
-                print("  -> Loading vectorizer...")
-                self.vectorizer = joblib.load(f"{base}/tfidf_vectorizer_v2.pkl")
-                print("  ✅ All models loaded via standard path!")
+                self.models[key] = joblib.load(path)
             except Exception as e:
-                print(f"  ❌ Failed standard load: {e}")
-                print("  -> Attempting fallback search...")
-                for file_name in ["product_model_v2.pkl", "sub_product_model_v2.pkl", "issue_model_v2.pkl", "priority_model_v2.pkl", "tfidf_vectorizer_v2.pkl"]:
-                    path = os.path.join(base, file_name)
-                    if os.path.exists(path):
-                        print(f"  -> Found {path}")
-        print("🎉 registry.load_all() complete!")
+                self._load_errors.append(f"Failed to load `{filename}`: {e}")
+
+        # ── vectorizer ─────────────────────────────────────────────────────────
+        vec_path = os.path.join(MODEL_DIR, VECTORIZER_FILE)
+        if not os.path.exists(vec_path):
+            self._load_errors.append(f"Vectorizer file not found: `{vec_path}`")
+        else:
+            try:
+                self.vectorizer = joblib.load(vec_path)
+            except Exception as e:
+                self._load_errors.append(f"Failed to load vectorizer: {e}")
+
+        self._loaded = True
         return self.models, self.vectorizer, self.nlp
+
 
 registry = ModelRegistry()
 
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 3. BACKGROUND IMAGE
+# ──────────────────────────────────────────────────────────────────────────────
 def get_bg_url():
-    import os
+    path = "static/background.png"
     try:
-        path = "static/background.png"
         if os.path.exists(path):
-            print(f"✅ Background Image verified at: {path}")
             import base64
             with open(path, "rb") as f:
                 data = base64.b64encode(f.read()).decode()
             return f"data:image/png;base64,{data}"
-        print("❌ Background Image NOT FOUND at static/background.png")
-        return ""
-    except Exception as e:
-        print(f"❌ Error in get_bg_url: {e}")
-        return ""
+    except Exception:
+        pass
+    return ""
+
 
 bg_url = get_bg_url()
 
-# 3. CUSTOM CSS - EXACT REPLICA
+# ──────────────────────────────────────────────────────────────────────────────
+# 4. CUSTOM CSS  (unchanged from original)
+# ──────────────────────────────────────────────────────────────────────────────
 custom_css = f"""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
 
 html, body, .stApp {{
-    background: linear-gradient(rgba(10, 14, 42, 0.72), rgba(10, 14, 42, 0.72)), 
+    background: linear-gradient(rgba(10, 14, 42, 0.72), rgba(10, 14, 42, 0.72)),
                 url('{bg_url}') no-repeat center center fixed !important;
     background-size: cover !important;
     margin: 0 !important;
@@ -136,9 +183,7 @@ html, body, .stApp {{
     font-family: 'Inter', sans-serif !important;
 }}
 
-.stApp > header {{
-    background-color: transparent !important;
-}}
+.stApp > header {{ background-color: transparent !important; }}
 
 .main .block-container {{
     max-width: 950px !important;
@@ -146,12 +191,10 @@ html, body, .stApp {{
     padding-bottom: 2rem !important;
 }}
 
-/* Hide Streamlit branding */
 #MainMenu {{visibility: hidden;}}
 footer {{visibility: hidden;}}
 header {{visibility: hidden;}}
 
-/* Card styling */
 .main-card {{
     background: rgba(17, 23, 53, 0.82) !important;
     border: 1px solid rgba(139, 92, 246, 0.4) !important;
@@ -161,7 +204,6 @@ header {{visibility: hidden;}}
     margin-bottom: 20px !important;
 }}
 
-/* Text area styling */
 .stTextArea textarea {{
     background: rgba(15, 23, 42, 0.95) !important;
     border: 1px solid #334155 !important;
@@ -171,7 +213,6 @@ header {{visibility: hidden;}}
     font-size: 15px !important;
 }}
 
-/* Button styling */
 .stButton > button {{
     background: linear-gradient(90deg, #7c3aed, #db2777) !important;
     height: 56px !important;
@@ -190,13 +231,8 @@ header {{visibility: hidden;}}
     transform: translateY(-2px);
 }}
 
-/* Sample button specific */
-button[kind="secondary"] {{
-    background: #5b21b6 !important;
-    border: none !important;
-}}
+button[kind="secondary"] {{ background: #5b21b6 !important; border: none !important; }}
 
-/* Output grid */
 .output-grid {{
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -227,108 +263,174 @@ button[kind="secondary"] {{
     display: block;
 }}
 
-/* Ensure all divs have transparent background except cards */
-div {{
-    background-color: transparent !important;
-}}
-
-.main-card, .output-item {{
-    background: rgba(17, 23, 53, 0.82) !important;
-}}
+div {{ background-color: transparent !important; }}
+.main-card, .output-item {{ background: rgba(17, 23, 53, 0.82) !important; }}
 </style>
 """
 
 st.markdown(custom_css, unsafe_allow_html=True)
 
-# 4. HEADER
+# ──────────────────────────────────────────────────────────────────────────────
+# 5. HEADER
+# ──────────────────────────────────────────────────────────────────────────────
 st.markdown("""
 <div style="text-align: center; margin-bottom: 30px; margin-top: 20px;">
-    <div style="font-size: 48px; font-weight: 800; display: flex; align-items: center; justify-content: center; gap: 20px; color: #ffffff;">
-        <span style="font-size: 56px; line-height: 1; filter: drop-shadow(0 0 10px rgba(168, 85, 247, 0.5));">🤖</span>
-        <span style="background: linear-gradient(90deg, #a855f7, #ffffff); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">CFPB Complaint Intelligence</span>
+    <div style="font-size: 48px; font-weight: 800; display: flex; align-items: center;
+                justify-content: center; gap: 20px; color: #ffffff;">
+        <span style="font-size: 56px; line-height: 1;
+                     filter: drop-shadow(0 0 10px rgba(168, 85, 247, 0.5));">🤖</span>
+        <span style="background: linear-gradient(90deg, #a855f7, #ffffff);
+                     -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
+            CFPB Complaint Intelligence
+        </span>
     </div>
-    <div style="color: #cbd5e1; font-size: 18px; margin-top: 8px;">Strategic ML Monitoring System for Smarter Complaint Analysis</div>
+    <div style="color: #cbd5e1; font-size: 18px; margin-top: 8px;">
+        Strategic ML Monitoring System for Smarter Complaint Analysis
+    </div>
 </div>
 """, unsafe_allow_html=True)
 
-# 5. MAIN CARD WRAPPER
+# ──────────────────────────────────────────────────────────────────────────────
+# 6. INPUT CARD
+# ──────────────────────────────────────────────────────────────────────────────
 st.markdown('<div class="main-card">', unsafe_allow_html=True)
 
-# Input section header with sample button
 col1, col2 = st.columns([4, 1])
 with col1:
-    st.markdown('<div style="font-size: 18px; font-weight: 600; color: #fff; display: flex; align-items: center; gap: 8px; margin-bottom: 10px;">🚀 Enter Complaint</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div style="font-size: 18px; font-weight: 600; color: #fff; '
+        'display: flex; align-items: center; gap: 8px; margin-bottom: 10px;">'
+        '🚀 Enter Complaint</div>',
+        unsafe_allow_html=True,
+    )
 with col2:
     if st.button("✨ Use Sample Input", key="sample_btn", type="secondary"):
-        st.session_state['complaint_text'] = random.choice(sample_inputs)
+        st.session_state["complaint_text"] = random.choice(sample_inputs)
         st.rerun()
 
-# Text area
 complaint_text = st.text_area(
     label="",
-    value=st.session_state.get('complaint_text', ''),
+    value=st.session_state.get("complaint_text", ""),
     placeholder="Type or paste the complaint here...",
     height=120,
     max_chars=1000,
     key="complaint_input",
-    label_visibility="collapsed"
+    label_visibility="collapsed",
 )
 
-# Character counter
 char_count = len(complaint_text)
 color = "#ef4444" if char_count > 1000 else "#64748b"
-st.markdown(f'<div style="text-align: right; color: {color}; font-size: 12px; margin-top: 4px;">{char_count} / 1000 characters</div>', unsafe_allow_html=True)
+st.markdown(
+    f'<div style="text-align: right; color: {color}; font-size: 12px; margin-top: 4px;">'
+    f"{char_count} / 1000 characters</div>",
+    unsafe_allow_html=True,
+)
 
-# Analyze button
 analyze_clicked = st.button("🚀 Analyze Now", key="analyze_btn")
 
-st.markdown('</div>', unsafe_allow_html=True)  # Close main-card
+st.markdown("</div>", unsafe_allow_html=True)  # close main-card
 
-# 6. ANALYSIS LOGIC
-def analyze_complaint(text):
+# ──────────────────────────────────────────────────────────────────────────────
+# 7. ANALYSIS LOGIC
+# ──────────────────────────────────────────────────────────────────────────────
+def analyze_complaint(text: str):
+    """
+    Run ML prediction pipeline on a complaint string.
+
+    Returns a tuple on success, or None on failure (errors are shown via st.error).
+    """
     if not text or len(text.strip()) < 5:
+        st.warning("⚠️ Please enter a complaint with at least 5 characters.")
         return None
-    
+
+    # ── Load artifacts ────────────────────────────────────────────────────────
     models, vectorizer, nlp = registry.load_all()
-    if not models or not vectorizer:
+
+    # Show any loading errors that were collected
+    if registry._load_errors:
+        for err in registry._load_errors:
+            st.error(f"❌ {err}")
+
+    # Debug visibility — confirm what actually loaded
+    missing_models = [k for k in REQUIRED_FILES if k not in models]
+    if missing_models:
+        st.error(
+            f"❌ The following models did not load: {missing_models}. "
+            "Check that all `.pkl` files are committed to your repository under `models/`."
+        )
         return None
-    
-    text_clean = clean_and_lemmatize(text)
-    X = vectorizer.transform([text_clean])
-    
-    product = models['product'].predict(X)[0]
-    sub_product = models['sub_product'].predict(X)[0]
-    issue = models['issue'].predict(X)[0]
-    priority = models['priority'].predict(X)[0]
+
+    if vectorizer is None:
+        st.error(
+            "❌ Vectorizer did not load. "
+            "Ensure `models/tfidf_vectorizer_v2.pkl` exists in the repository."
+        )
+        return None
+
+    # ── Pre-process text ──────────────────────────────────────────────────────
+    try:
+        text_clean = clean_and_lemmatize(text)
+    except Exception as e:
+        st.error(f"❌ Text pre-processing failed: {e}")
+        return None
+
+    # ── Vectorise ─────────────────────────────────────────────────────────────
+    try:
+        X = vectorizer.transform([text_clean])
+    except Exception as e:
+        st.error(f"❌ Vectorisation failed: {e}")
+        return None
+
+    # ── Predict ───────────────────────────────────────────────────────────────
+    try:
+        product     = models["product"].predict(X)[0]
+        sub_product = models["sub_product"].predict(X)[0]
+        issue       = models["issue"].predict(X)[0]
+        priority    = models["priority"].predict(X)[0]
+    except Exception as e:
+        st.error(f"❌ Prediction failed: {e}")
+        return None
+
     prob = round(random.uniform(76.0, 95.0), 1)
-    
-    # Extract top features
+
+    # ── Extract top TF-IDF keywords ───────────────────────────────────────────
     try:
         feature_names = vectorizer.get_feature_names_out()
-        sorted_items = sorted(zip(X.tocoo().col, X.tocoo().data), key=lambda x: x[1], reverse=True)
-        top_words = [feature_names[i] for i, score in sorted_items[:5]]
-    except:
+        coo = X.tocoo()
+        sorted_items = sorted(zip(coo.col, coo.data), key=lambda x: x[1], reverse=True)
+        top_words = [feature_names[i] for i, _ in sorted_items[:5]]
+    except Exception:
         top_words = text_clean.split()[:5]
-    
+
     return product, sub_product, issue, priority, prob, top_words
 
-# 7. DISPLAY RESULTS
-if analyze_clicked and complaint_text and len(complaint_text.strip()) >= 5:
-    with st.spinner("Analyzing complaint..."):
-        result = analyze_complaint(complaint_text)
-        
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 8. DISPLAY RESULTS
+# ──────────────────────────────────────────────────────────────────────────────
+if analyze_clicked:
+    if not complaint_text or len(complaint_text.strip()) < 5:
+        st.warning("⚠️ Please enter a complaint with at least 5 characters before analyzing.")
+    else:
+        with st.spinner("Analyzing complaint..."):
+            result = analyze_complaint(complaint_text)
+
         if result:
             product, sub_product, issue, priority, prob, top_words = result
-            
-            # Color coding
+
             p_color = "#10b981" if priority == "Low" else "#ef4444"
-            
-            # Keywords HTML
-            keywords_html = "".join([f'<span style="background: rgba(124, 58, 237, 0.2); color: #c084fc; border: 1px solid rgba(124, 58, 237, 0.4); padding: 4px 12px; border-radius: 6px; font-weight: 600; font-size: 13px; margin-right: 8px; display: inline-block; margin-bottom: 8px;">{word.upper()}</span>' for word in top_words])
-            
-            # Output card
+
+            keywords_html = "".join([
+                f'<span style="background: rgba(124, 58, 237, 0.2); color: #c084fc; '
+                f'border: 1px solid rgba(124, 58, 237, 0.4); padding: 4px 12px; '
+                f'border-radius: 6px; font-weight: 600; font-size: 13px; '
+                f'margin-right: 8px; display: inline-block; margin-bottom: 8px;">'
+                f"{word.upper()}</span>"
+                for word in top_words
+            ])
+
             st.markdown('<div class="main-card">', unsafe_allow_html=True)
-            
+
             st.markdown(f"""
             <div class="output-grid">
                 <div class="output-item">
@@ -348,45 +450,68 @@ if analyze_clicked and complaint_text and len(complaint_text.strip()) >= 5:
                     <div class="output-val" style="color: {p_color};">{priority}</div>
                 </div>
             </div>
-            
-            <div style="background: rgba(15, 23, 42, 0.8); border: 1px solid #334155; border-radius: 10px; padding: 20px; display: flex; align-items: center; gap: 25px;">
-                <div style="width: 64px; height: 64px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 32px; color: {p_color}; background: {p_color}11; border: 2px solid {p_color}33;">🛡️</div>
+
+            <div style="background: rgba(15, 23, 42, 0.8); border: 1px solid #334155;
+                        border-radius: 10px; padding: 20px;
+                        display: flex; align-items: center; gap: 25px;">
+                <div style="width: 64px; height: 64px; border-radius: 50%;
+                            display: flex; align-items: center; justify-content: center;
+                            font-size: 32px; color: {p_color};
+                            background: {p_color}11; border: 2px solid {p_color}33;">🛡️</div>
                 <div style="flex-grow: 1;">
                     <div style="font-size: 14px; color: #94a3b8;">Prediction Status</div>
-                    <div style="font-size: 26px; font-weight: 800; color: {p_color}; margin: 4px 0;">{priority} Urgency Detected</div>
+                    <div style="font-size: 26px; font-weight: 800; color: {p_color}; margin: 4px 0;">
+                        {priority} Urgency Detected
+                    </div>
                     <div style="font-size: 14px; color: #cbd5e1;">Confidence Score: {prob}%</div>
-                    <div style="width: 100%; height: 8px; background: #1e293b; border-radius: 4px; margin-top: 12px; overflow: hidden;">
-                        <div style="height: 100%; width: {prob}%; background: {p_color}; box-shadow: 0 0 10px {p_color};"></div>
+                    <div style="width: 100%; height: 8px; background: #1e293b;
+                                border-radius: 4px; margin-top: 12px; overflow: hidden;">
+                        <div style="height: 100%; width: {prob}%; background: {p_color};
+                                    box-shadow: 0 0 10px {p_color};"></div>
                     </div>
                 </div>
             </div>
-            
-            <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid #1e293b; border-radius: 10px; padding: 20px; margin-top: 20px;">
-                <div style="font-size: 14px; font-weight: 600; color: #94a3b8; margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
-                    🧠 Predictor Rationale & Key Words
+
+            <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid #1e293b;
+                        border-radius: 10px; padding: 20px; margin-top: 20px;">
+                <div style="font-size: 14px; font-weight: 600; color: #94a3b8;
+                            margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+                    🧠 Predictor Rationale &amp; Key Words
                 </div>
                 <div style="font-size: 15px; color: #cbd5e1; line-height: 1.6;">
-                    The ML ensemble successfully categorized this complaint by identifying maximum TF-IDF vector weights. The following extracted keywords were critical in routing this to <b>{product}</b>:
+                    The ML ensemble successfully categorized this complaint by identifying maximum
+                    TF-IDF vector weights. The following extracted keywords were critical in routing
+                    this to <b>{product}</b>:
                 </div>
                 <div style="display: flex; gap: 10px; margin-top: 15px; flex-wrap: wrap;">
                     {keywords_html}
                 </div>
             </div>
             """, unsafe_allow_html=True)
-            
-            st.markdown('</div>', unsafe_allow_html=True)
 
-# 8. FOOTER
+            st.markdown("</div>", unsafe_allow_html=True)
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 9. FOOTER
+# ──────────────────────────────────────────────────────────────────────────────
 st.markdown("""
-<div style="display: flex; justify-content: space-between; font-size: 13px; color: #64748b; margin-top: 40px; border-top: 1px solid #1e293b; padding-top: 20px;">
+<div style="display: flex; justify-content: space-between; font-size: 13px; color: #64748b;
+            margin-top: 40px; border-top: 1px solid #1e293b; padding-top: 20px;">
     <div>🛡️ Secure • Private • Confidential</div>
     <div>Powered by <span style="color: #7c3aed; font-weight: 600;">Machine Learning</span></div>
-    <div style="background: rgba(91, 33, 182, 0.3); padding: 2px 8px; border-radius: 4px;">Total Sample Inputs: 35</div>
+    <div style="background: rgba(91, 33, 182, 0.3); padding: 2px 8px; border-radius: 4px;">
+        Total Sample Inputs: 35
+    </div>
 </div>
 """, unsafe_allow_html=True)
 
-# Initialize models on startup
-if 'models_loaded' not in st.session_state:
-    print("🚀 Initializing Model Registry...")
+# ──────────────────────────────────────────────────────────────────────────────
+# 10. WARM-UP  — load models once at startup so first click is instant
+# ──────────────────────────────────────────────────────────────────────────────
+if "models_loaded" not in st.session_state:
     registry.load_all()
-    st.session_state['models_loaded'] = True
+    # Surface any load errors immediately on startup
+    if registry._load_errors:
+        for err in registry._load_errors:
+            st.warning(f"⚠️ Startup warning — {err}")
+    st.session_state["models_loaded"] = True
