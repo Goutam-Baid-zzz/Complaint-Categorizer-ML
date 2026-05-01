@@ -1,39 +1,15 @@
 import streamlit as st
-import pandas as pd
-import joblib
 import os
 import random
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Try importing gdown — fail visibly if not installed
+# IMPORTANT — All heavy imports (joblib, spacy, gdown) are deferred inside
+# load_models() below.  Nothing slow runs at module level, so the page renders
+# instantly and Render's health-check passes without a timeout.
 # ──────────────────────────────────────────────────────────────────────────────
-try:
-    import gdown
-except ImportError:
-    st.error(
-        "❌ `gdown` is not installed. Add `gdown` to your requirements.txt and redeploy."
-    )
-    st.stop()
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Try importing spaCy — fail visibly if not installed
-# ──────────────────────────────────────────────────────────────────────────────
-try:
-    import spacy
-except ImportError:
-    st.error(
-        "❌ spaCy is not installed. Add `spacy` to your requirements.txt and redeploy."
-    )
-    st.stop()
-
-try:
-    from src.utils.text_utils import clean_and_lemmatize
-except ImportError as e:
-    st.error(f"❌ Could not import text utilities: {e}")
-    st.stop()
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Page configuration
+# Page configuration  (must be first Streamlit call)
 # ──────────────────────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="CFPB AI Intelligence",
@@ -85,11 +61,10 @@ while len(sample_inputs) < 40:
     sample_inputs.append(random.choice(sample_inputs))
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 2. GOOGLE DRIVE FILE REGISTRY + DOWNLOADER
+# 2. MODEL CONFIG  (constants only — no I/O here)
 # ──────────────────────────────────────────────────────────────────────────────
 MODEL_DIR = "models"
 
-# Maps local filename → Google Drive file ID
 GDRIVE_FILES = {
     "product_model_v2.pkl":     "1MWnw-X4yRHWRTw8NYb2XdLFPdoFEPWgi",
     "sub_product_model_v2.pkl": "1y5BVXnmMek1aGvHJ_88G4c0HdtoHSg8c",
@@ -98,8 +73,7 @@ GDRIVE_FILES = {
     "tfidf_vectorizer_v2.pkl":  "1IBobv4wgqEGGtMpIXbiwjJCb6YHvxa0o",
 }
 
-# Logical key → filename mapping (used by the registry)
-REQUIRED_FILES = {
+REQUIRED_MODELS = {
     "product":     "product_model_v2.pkl",
     "sub_product": "sub_product_model_v2.pkl",
     "issue":       "issue_model_v2.pkl",
@@ -107,140 +81,117 @@ REQUIRED_FILES = {
 }
 VECTORIZER_FILE = "tfidf_vectorizer_v2.pkl"
 
-
-def download_models() -> list[str]:
+# ──────────────────────────────────────────────────────────────────────────────
+# 3. LAZY MODEL LOADER
+#
+#    @st.cache_resource: Streamlit runs this function body ONCE per server
+#    process and caches the returned tuple.  Every subsequent call gets the
+#    cached result in <1 ms — no re-downloading, no re-loading.
+#
+#    CRITICAL: This function is called ONLY from inside the button handler
+#    (section 8 below).  It is NEVER called at module level, so a cold page
+#    load performs zero network I/O and Render's health-check passes instantly.
+# ──────────────────────────────────────────────────────────────────────────────
+@st.cache_resource(show_spinner=False)
+def load_models():
     """
-    Download all model files from Google Drive into MODEL_DIR.
-    Skips files that already exist locally.
-
-    Returns a list of error strings (empty list = all good).
+    Download (if missing) then load all ML artifacts.
+    Returns (models_dict, vectorizer, nlp).
+    Raises RuntimeError with a clear message on any failure.
     """
-    errors: list[str] = []
+    # Deferred heavy imports — nothing below runs until user clicks Analyze
+    try:
+        import gdown
+    except ImportError:
+        raise RuntimeError(
+            "`gdown` is not installed. Add `gdown` to requirements.txt and redeploy."
+        )
+    try:
+        import joblib
+    except ImportError:
+        raise RuntimeError(
+            "`joblib` is not installed. Add `joblib` to requirements.txt and redeploy."
+        )
+    try:
+        import spacy
+    except ImportError:
+        raise RuntimeError(
+            "`spacy` is not installed. Add `spacy` to requirements.txt and redeploy."
+        )
 
+    # Create models directory
     try:
         os.makedirs(MODEL_DIR, exist_ok=True)
-    except OSError as e:
-        return [f"Could not create `{MODEL_DIR}` directory: {e}"]
+    except OSError as exc:
+        raise RuntimeError(f"Cannot create `{MODEL_DIR}` directory: {exc}")
 
+    # Download any missing files
     for filename, file_id in GDRIVE_FILES.items():
-        output_path = os.path.join(MODEL_DIR, filename)
-
-        if os.path.exists(output_path):
-            # Already cached — skip download
-            continue
+        dest = os.path.join(MODEL_DIR, filename)
+        if os.path.exists(dest):
+            continue  # already on disk — skip
 
         url = f"https://drive.google.com/uc?id={file_id}"
         try:
-            result = gdown.download(url, output_path, quiet=False)
-            if result is None:
-                # gdown returns None when the download fails (e.g. permission error)
-                errors.append(
-                    f"Failed to download `{filename}` from Google Drive. "
-                    "Ensure the file is shared as 'Anyone with the link can view'."
-                )
-                # Remove any partial file so the next run retries cleanly
-                if os.path.exists(output_path):
-                    os.remove(output_path)
-        except Exception as e:
-            errors.append(f"Exception while downloading `{filename}`: {e}")
-            if os.path.exists(output_path):
-                os.remove(output_path)
+            result = gdown.download(url, dest, quiet=False)
+        except Exception as exc:
+            if os.path.exists(dest):
+                os.remove(dest)
+            raise RuntimeError(f"Exception downloading `{filename}`: {exc}")
 
-    return errors
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# 3. MODEL REGISTRY  — lazy, cached via @st.cache_resource
-#    Nothing is downloaded or loaded at import time.
-#    load_all() is called only when the user clicks "Analyze Now".
-#    @st.cache_resource ensures the result is reused for every subsequent run
-#    within the same Streamlit server process (no re-download, no re-load).
-# ──────────────────────────────────────────────────────────────────────────────
-class ModelRegistry:
-    def __init__(self):
-        self.models: dict = {}
-        self.vectorizer = None
-        self.nlp = None
-        self._loaded: bool = False
-        self._load_errors: list[str] = []
-
-    def load_all(self):
-        """Download (if needed) and load all artifacts exactly once.
-        Returns (models, vectorizer, nlp).
-        Safe to call repeatedly — skips work after the first successful load.
-        """
-        if self._loaded:
-            return self.models, self.vectorizer, self.nlp
-
-        self._load_errors = []
-
-        # ── Step 1: download model files from Google Drive ─────────────────────
-        download_errors = download_models()
-        self._load_errors.extend(download_errors)
-
-        # ── Step 2: load spaCy ─────────────────────────────────────────────────
-        # Must be pre-installed — add to your Render build command:
-        #   python -m spacy download en_core_web_sm
-        try:
-            self.nlp = spacy.load("en_core_web_sm", disable=["parser", "ner"])
-        except OSError:
-            self._load_errors.append(
-                "spaCy model `en_core_web_sm` not found. "
-                "Add `en-core-web-sm` to requirements.txt or run "
-                "`python -m spacy download en_core_web_sm` in your Render build command."
+        if result is None:
+            if os.path.exists(dest):
+                os.remove(dest)
+            raise RuntimeError(
+                f"Failed to download `{filename}` from Google Drive. "
+                "Make sure it is shared as 'Anyone with the link can view'."
             )
-            self.nlp = None
 
-        # ── Step 3: load sklearn models ────────────────────────────────────────
-        for key, filename in REQUIRED_FILES.items():
-            path = os.path.join(MODEL_DIR, filename)
-            if not os.path.exists(path):
-                self._load_errors.append(
-                    f"Model file still missing after download attempt: `{path}`"
-                )
-                continue
-            try:
-                self.models[key] = joblib.load(path)
-            except Exception as e:
-                self._load_errors.append(f"Failed to load `{filename}`: {e}")
-
-        # ── Step 4: load vectorizer ────────────────────────────────────────────
-        vec_path = os.path.join(MODEL_DIR, VECTORIZER_FILE)
-        if not os.path.exists(vec_path):
-            self._load_errors.append(
-                f"Vectorizer still missing after download attempt: `{vec_path}`"
-            )
-        else:
-            try:
-                self.vectorizer = joblib.load(vec_path)
-            except Exception as e:
-                self._load_errors.append(f"Failed to load vectorizer: {e}")
-
-        self._loaded = True
-        return self.models, self.vectorizer, self.nlp
-
-
-@st.cache_resource
-def get_registry() -> ModelRegistry:
-    """
-    Return a single shared ModelRegistry instance for the lifetime of the
-    Streamlit server process.  @st.cache_resource means this function body
-    runs exactly once — subsequent calls return the same object instantly,
-    with no downloading or loading.  The registry is NOT populated here;
-    load_all() is deferred until the user first clicks Analyze Now.
-    """
-    return ModelRegistry()
-
-
-registry = get_registry()
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# 4. BACKGROUND IMAGE
-# ──────────────────────────────────────────────────────────────────────────────
-def get_bg_url():
-    path = "static/background.png"
+    # Load spaCy
     try:
+        nlp = spacy.load("en_core_web_sm", disable=["parser", "ner"])
+    except OSError:
+        raise RuntimeError(
+            "spaCy model `en_core_web_sm` not found. "
+            "Add `en-core-web-sm` to requirements.txt or add "
+            "`python -m spacy download en_core_web_sm` to your Render build command."
+        )
+
+    # Load sklearn models
+    models = {}
+    for key, filename in REQUIRED_MODELS.items():
+        path = os.path.join(MODEL_DIR, filename)
+        if not os.path.exists(path):
+            raise RuntimeError(
+                f"Model file missing after download: `{path}`. "
+                "Check the Google Drive file ID and sharing permissions."
+            )
+        try:
+            models[key] = joblib.load(path)
+        except Exception as exc:
+            raise RuntimeError(f"Failed to load `{filename}`: {exc}")
+
+    # Load vectorizer
+    vec_path = os.path.join(MODEL_DIR, VECTORIZER_FILE)
+    if not os.path.exists(vec_path):
+        raise RuntimeError(
+            f"Vectorizer missing after download: `{vec_path}`. "
+            "Check the Google Drive file ID and sharing permissions."
+        )
+    try:
+        vectorizer = joblib.load(vec_path)
+    except Exception as exc:
+        raise RuntimeError(f"Failed to load vectorizer: {exc}")
+
+    return models, vectorizer, nlp
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 4. BACKGROUND IMAGE  (fast local file read — safe at module level)
+# ──────────────────────────────────────────────────────────────────────────────
+def get_bg_url() -> str:
+    try:
+        path = "static/background.png"
         if os.path.exists(path):
             import base64
             with open(path, "rb") as f:
@@ -254,7 +205,7 @@ def get_bg_url():
 bg_url = get_bg_url()
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 5. CUSTOM CSS  (unchanged from original)
+# 5. CUSTOM CSS  (unchanged)
 # ──────────────────────────────────────────────────────────────────────────────
 custom_css = f"""
 <style>
@@ -359,7 +310,7 @@ div {{ background-color: transparent !important; }}
 st.markdown(custom_css, unsafe_allow_html=True)
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 5. HEADER
+# 6. HEADER  (unchanged)
 # ──────────────────────────────────────────────────────────────────────────────
 st.markdown("""
 <div style="text-align: center; margin-bottom: 30px; margin-top: 20px;">
@@ -379,7 +330,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 6. INPUT CARD
+# 7. INPUT CARD  (unchanged)
 # ──────────────────────────────────────────────────────────────────────────────
 st.markdown('<div class="main-card">', unsafe_allow_html=True)
 
@@ -407,9 +358,9 @@ complaint_text = st.text_area(
 )
 
 char_count = len(complaint_text)
-color = "#ef4444" if char_count > 1000 else "#64748b"
+char_color = "#ef4444" if char_count > 1000 else "#64748b"
 st.markdown(
-    f'<div style="text-align: right; color: {color}; font-size: 12px; margin-top: 4px;">'
+    f'<div style="text-align: right; color: {char_color}; font-size: 12px; margin-top: 4px;">'
     f"{char_count} / 1000 characters</div>",
     unsafe_allow_html=True,
 )
@@ -419,170 +370,140 @@ analyze_clicked = st.button("🚀 Analyze Now", key="analyze_btn")
 st.markdown("</div>", unsafe_allow_html=True)  # close main-card
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 7. ANALYSIS LOGIC
-# ──────────────────────────────────────────────────────────────────────────────
-def analyze_complaint(text: str):
-    """
-    Run ML prediction pipeline on a complaint string.
-
-    Returns a tuple on success, or None on failure (errors are shown via st.error).
-    """
-    if not text or len(text.strip()) < 5:
-        st.warning("⚠️ Please enter a complaint with at least 5 characters.")
-        return None
-
-    # ── Load artifacts ────────────────────────────────────────────────────────
-    models, vectorizer, nlp = registry.load_all()
-
-    # Show any loading errors that were collected
-    if registry._load_errors:
-        for err in registry._load_errors:
-            st.error(f"❌ {err}")
-
-    # Debug visibility — confirm what actually loaded
-    missing_models = [k for k in REQUIRED_FILES if k not in models]
-    if missing_models:
-        st.error(
-            f"❌ The following models did not load: {missing_models}. "
-            "Download may have failed — check that each Google Drive file is shared "
-            "as 'Anyone with the link can view' and that `gdown` is in requirements.txt."
-        )
-        return None
-
-    if vectorizer is None:
-        st.error(
-            "❌ Vectorizer did not load. "
-            "Download may have failed — verify the Google Drive link for "
-            "`tfidf_vectorizer_v2.pkl` is publicly accessible."
-        )
-        return None
-
-    # ── Pre-process text ──────────────────────────────────────────────────────
-    try:
-        text_clean = clean_and_lemmatize(text)
-    except Exception as e:
-        st.error(f"❌ Text pre-processing failed: {e}")
-        return None
-
-    # ── Vectorise ─────────────────────────────────────────────────────────────
-    try:
-        X = vectorizer.transform([text_clean])
-    except Exception as e:
-        st.error(f"❌ Vectorisation failed: {e}")
-        return None
-
-    # ── Predict ───────────────────────────────────────────────────────────────
-    try:
-        product     = models["product"].predict(X)[0]
-        sub_product = models["sub_product"].predict(X)[0]
-        issue       = models["issue"].predict(X)[0]
-        priority    = models["priority"].predict(X)[0]
-    except Exception as e:
-        st.error(f"❌ Prediction failed: {e}")
-        return None
-
-    prob = round(random.uniform(76.0, 95.0), 1)
-
-    # ── Extract top TF-IDF keywords ───────────────────────────────────────────
-    try:
-        feature_names = vectorizer.get_feature_names_out()
-        coo = X.tocoo()
-        sorted_items = sorted(zip(coo.col, coo.data), key=lambda x: x[1], reverse=True)
-        top_words = [feature_names[i] for i, _ in sorted_items[:5]]
-    except Exception:
-        top_words = text_clean.split()[:5]
-
-    return product, sub_product, issue, priority, prob, top_words
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# 8. DISPLAY RESULTS
+# 8. ANALYZE — runs only when button is clicked, never at startup
 # ──────────────────────────────────────────────────────────────────────────────
 if analyze_clicked:
     if not complaint_text or len(complaint_text.strip()) < 5:
         st.warning("⚠️ Please enter a complaint with at least 5 characters before analyzing.")
     else:
-        with st.spinner("⏳ Loading models & analyzing complaint — this may take a moment on first run..."):
-            result = analyze_complaint(complaint_text)
+        with st.spinner("⏳ Loading models & analyzing — this may take a moment on first run..."):
 
-        if result:
-            product, sub_product, issue, priority, prob, top_words = result
+            # Load (or retrieve cached) models — first call triggers download
+            try:
+                models, vectorizer, nlp = load_models()
+            except RuntimeError as exc:
+                st.error(f"❌ Model loading failed: {exc}")
+                st.stop()
 
-            p_color = "#10b981" if priority == "Low" else "#ef4444"
+            # Import text utility (deferred — does not run at startup)
+            try:
+                from src.utils.text_utils import clean_and_lemmatize
+            except ImportError as exc:
+                st.error(f"❌ Could not import text utilities: {exc}")
+                st.stop()
 
-            keywords_html = "".join([
-                f'<span style="background: rgba(124, 58, 237, 0.2); color: #c084fc; '
-                f'border: 1px solid rgba(124, 58, 237, 0.4); padding: 4px 12px; '
-                f'border-radius: 6px; font-weight: 600; font-size: 13px; '
-                f'margin-right: 8px; display: inline-block; margin-bottom: 8px;">'
-                f"{word.upper()}</span>"
-                for word in top_words
-            ])
+            # Pre-process
+            try:
+                text_clean = clean_and_lemmatize(complaint_text)
+            except Exception as exc:
+                st.error(f"❌ Text pre-processing failed: {exc}")
+                st.stop()
 
-            st.markdown('<div class="main-card">', unsafe_allow_html=True)
+            # Vectorise
+            try:
+                X = vectorizer.transform([text_clean])
+            except Exception as exc:
+                st.error(f"❌ Vectorisation failed: {exc}")
+                st.stop()
 
-            st.markdown(f"""
-            <div class="output-grid">
-                <div class="output-item">
-                    <div class="output-label">📦 Product</div>
-                    <div class="output-val" style="color: #ffffff;">{product}</div>
+            # Predict
+            try:
+                product     = models["product"].predict(X)[0]
+                sub_product = models["sub_product"].predict(X)[0]
+                issue       = models["issue"].predict(X)[0]
+                priority    = models["priority"].predict(X)[0]
+            except Exception as exc:
+                st.error(f"❌ Prediction failed: {exc}")
+                st.stop()
+
+            # Top TF-IDF keywords
+            try:
+                feature_names = vectorizer.get_feature_names_out()
+                coo = X.tocoo()
+                sorted_items = sorted(
+                    zip(coo.col, coo.data), key=lambda x: x[1], reverse=True
+                )
+                top_words = [feature_names[i] for i, _ in sorted_items[:5]]
+            except Exception:
+                top_words = text_clean.split()[:5]
+
+        # Render results (outside spinner so layout is not constrained)
+        prob    = round(random.uniform(76.0, 95.0), 1)
+        p_color = "#10b981" if priority == "Low" else "#ef4444"
+
+        keywords_html = "".join([
+            f'<span style="background: rgba(124, 58, 237, 0.2); color: #c084fc; '
+            f'border: 1px solid rgba(124, 58, 237, 0.4); padding: 4px 12px; '
+            f'border-radius: 6px; font-weight: 600; font-size: 13px; '
+            f'margin-right: 8px; display: inline-block; margin-bottom: 8px;">'
+            f"{word.upper()}</span>"
+            for word in top_words
+        ])
+
+        st.markdown('<div class="main-card">', unsafe_allow_html=True)
+
+        st.markdown(f"""
+        <div class="output-grid">
+            <div class="output-item">
+                <div class="output-label">📦 Product</div>
+                <div class="output-val" style="color: #ffffff;">{product}</div>
+            </div>
+            <div class="output-item">
+                <div class="output-label">🏷️ Sub-product</div>
+                <div class="output-val" style="color: #ffffff;">{sub_product}</div>
+            </div>
+            <div class="output-item">
+                <div class="output-label">⚠️ Issue</div>
+                <div class="output-val" style="color: #f59e0b;">{issue}</div>
+            </div>
+            <div class="output-item">
+                <div class="output-label">🚩 Priority</div>
+                <div class="output-val" style="color: {p_color};">{priority}</div>
+            </div>
+        </div>
+
+        <div style="background: rgba(15, 23, 42, 0.8); border: 1px solid #334155;
+                    border-radius: 10px; padding: 20px;
+                    display: flex; align-items: center; gap: 25px;">
+            <div style="width: 64px; height: 64px; border-radius: 50%;
+                        display: flex; align-items: center; justify-content: center;
+                        font-size: 32px; color: {p_color};
+                        background: {p_color}11; border: 2px solid {p_color}33;">🛡️</div>
+            <div style="flex-grow: 1;">
+                <div style="font-size: 14px; color: #94a3b8;">Prediction Status</div>
+                <div style="font-size: 26px; font-weight: 800; color: {p_color}; margin: 4px 0;">
+                    {priority} Urgency Detected
                 </div>
-                <div class="output-item">
-                    <div class="output-label">🏷️ Sub-product</div>
-                    <div class="output-val" style="color: #ffffff;">{sub_product}</div>
-                </div>
-                <div class="output-item">
-                    <div class="output-label">⚠️ Issue</div>
-                    <div class="output-val" style="color: #f59e0b;">{issue}</div>
-                </div>
-                <div class="output-item">
-                    <div class="output-label">🚩 Priority</div>
-                    <div class="output-val" style="color: {p_color};">{priority}</div>
+                <div style="font-size: 14px; color: #cbd5e1;">Confidence Score: {prob}%</div>
+                <div style="width: 100%; height: 8px; background: #1e293b;
+                            border-radius: 4px; margin-top: 12px; overflow: hidden;">
+                    <div style="height: 100%; width: {prob}%; background: {p_color};
+                                box-shadow: 0 0 10px {p_color};"></div>
                 </div>
             </div>
+        </div>
 
-            <div style="background: rgba(15, 23, 42, 0.8); border: 1px solid #334155;
-                        border-radius: 10px; padding: 20px;
-                        display: flex; align-items: center; gap: 25px;">
-                <div style="width: 64px; height: 64px; border-radius: 50%;
-                            display: flex; align-items: center; justify-content: center;
-                            font-size: 32px; color: {p_color};
-                            background: {p_color}11; border: 2px solid {p_color}33;">🛡️</div>
-                <div style="flex-grow: 1;">
-                    <div style="font-size: 14px; color: #94a3b8;">Prediction Status</div>
-                    <div style="font-size: 26px; font-weight: 800; color: {p_color}; margin: 4px 0;">
-                        {priority} Urgency Detected
-                    </div>
-                    <div style="font-size: 14px; color: #cbd5e1;">Confidence Score: {prob}%</div>
-                    <div style="width: 100%; height: 8px; background: #1e293b;
-                                border-radius: 4px; margin-top: 12px; overflow: hidden;">
-                        <div style="height: 100%; width: {prob}%; background: {p_color};
-                                    box-shadow: 0 0 10px {p_color};"></div>
-                    </div>
-                </div>
+        <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid #1e293b;
+                    border-radius: 10px; padding: 20px; margin-top: 20px;">
+            <div style="font-size: 14px; font-weight: 600; color: #94a3b8;
+                        margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+                🧠 Predictor Rationale &amp; Key Words
             </div>
-
-            <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid #1e293b;
-                        border-radius: 10px; padding: 20px; margin-top: 20px;">
-                <div style="font-size: 14px; font-weight: 600; color: #94a3b8;
-                            margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
-                    🧠 Predictor Rationale &amp; Key Words
-                </div>
-                <div style="font-size: 15px; color: #cbd5e1; line-height: 1.6;">
-                    The ML ensemble successfully categorized this complaint by identifying maximum
-                    TF-IDF vector weights. The following extracted keywords were critical in routing
-                    this to <b>{product}</b>:
-                </div>
-                <div style="display: flex; gap: 10px; margin-top: 15px; flex-wrap: wrap;">
-                    {keywords_html}
-                </div>
+            <div style="font-size: 15px; color: #cbd5e1; line-height: 1.6;">
+                The ML ensemble successfully categorized this complaint by identifying maximum
+                TF-IDF vector weights. The following extracted keywords were critical in routing
+                this to <b>{product}</b>:
             </div>
-            """, unsafe_allow_html=True)
+            <div style="display: flex; gap: 10px; margin-top: 15px; flex-wrap: wrap;">
+                {keywords_html}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 
-            st.markdown("</div>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 9. FOOTER
+# 9. FOOTER  (unchanged)
 # ──────────────────────────────────────────────────────────────────────────────
 st.markdown("""
 <div style="display: flex; justify-content: space-between; font-size: 13px; color: #64748b;
@@ -594,15 +515,3 @@ st.markdown("""
     </div>
 </div>
 """, unsafe_allow_html=True)
-
-# ──────────────────────────────────────────────────────────────────────────────
-# 10. WARM-UP  — load models once at startup so first click is instant
-# ──────────────────────────────────────────────────────────────────────────────
-if "models_loaded" not in st.session_state:
-    with st.spinner("⏳ Downloading & loading ML models on first run — please wait..."):
-        registry.load_all()
-    # Surface any load/download errors immediately on startup
-    if registry._load_errors:
-        for err in registry._load_errors:
-            st.warning(f"⚠️ Startup warning — {err}")
-    st.session_state["models_loaded"] = True
