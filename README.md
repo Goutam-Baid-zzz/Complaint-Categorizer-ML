@@ -117,8 +117,6 @@ streamlit run app.py
 │   │   └── train_priority.py
 │   └── utils/
 │       └── text_utils.py    # Text cleaning utilities
-├── static/
-│   └── background.png       # UI background image
 ├── data/
 │   └── processed/           # Processed datasets
 ├── requirements.txt         # Python dependencies
