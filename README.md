@@ -16,7 +16,15 @@ An expert-level Machine Learning system designed to categorize financial consume
 4. **Outcome**: Instant visualization of complaint categorization and urgency level.
 
 ## 📂 Data & Resources
-The model weights are securely stored and retrieved dynamically to maintain a lightweight repository footprint while ensuring high performance.
+
+The dataset used in this project is sourced from the public database of the Consumer Financial Protection Bureau (CFPB), a U.S. government agency that collects and maintains consumer complaints related to financial products and services such as credit cards, loans, and banking.
+
+**🔗 Official Dataset Source**:
+https://www.consumerfinance.gov/data-research/consumer-complaints/
+
+**Note**: The complete dataset provided by CFPB is quite large and contains extensive records. For the purpose of this project, a filtered and preprocessed subset of the dataset has been used to ensure efficient training and faster performance.
+
+---
 
 ## 🛠️ Tech Stack
 - **Engine**: Python 3.12, Scikit-learn
